@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: monitoring
+data:
+  service-alerts.yaml: |
+    groups:
+      - name: service_health
+        interval: 30s
+        rules:
+          # Service is down
+          - alert: ServiceDown
+            expr: up{job=~".*-service|api-gateway"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: service
+            annotations:
+              summary: "Service {{ $labels.job }} is down"
+              description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute."
+
+          # High error rate (5xx errors)
+          - alert: HighErrorRate
+            expr: |
+              (
+                sum(rate(http_requests_total{job=~".*-service|api-gateway",status=~"5.."}[5m])) by (job)
+                /
+                sum(rate(http_requests_total{job=~".*-service|api-gateway"}[5m])) by (job)
+              ) * 100 > 5
+            for: 5m
+            labels:
+              severity: critical
+              component: service
+            annotations:
+              summary: "High error rate on {{ $labels.job }}"
+              description: "{{ $labels.job }} is experiencing {{ $value | humanize }}% error rate (5xx responses)."
+
+          # High latency (p95 > 1 second)
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(http_request_duration_seconds_bucket{job=~".*-service|api-gateway"}[5m])) by (job, le)
+              ) > 1
+            for: 5m
+            labels:
+              severity: warning
+              component: service
+            annotations:
+              summary: "High latency on {{ $labels.job }}"
+              description: "{{ $labels.job }} has p95 latency of {{ $value | humanize }}s (threshold: 1s)."
+
+          # Very high latency (p95 > 3 seconds)
+          - alert: VeryHighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(http_request_duration_seconds_bucket{job=~".*-service|api-gateway"}[5m])) by (job, le)
+              ) > 3
+            for: 2m
+            labels:
+              severity: critical
+              component: service
+            annotations:
+              summary: "Very high latency on {{ $labels.job }}"
+              description: "{{ $labels.job }} has p95 latency of {{ $value | humanize }}s (threshold: 3s)."
+
+          # Low request rate (possible issue)
+          - alert: LowRequestRate
+            expr: |
+              sum(rate(http_requests_total{job=~".*-service|api-gateway"}[5m])) by (job) < 1
+              and
+              sum(rate(http_requests_total{job=~".*-service|api-gateway"}[30m] offset 1h)) by (job) > 10
+            for: 10m
+            labels:
+              severity: warning
+              component: service
+            annotations:
+              summary: "Low request rate on {{ $labels.job }}"
+              description: "{{ $labels.job }} is receiving {{ $value | humanize }} requests/sec, which is unusually low."
+
+          # Too many restarts
+          - alert: PodRestartingTooMuch
+            expr: |
+              rate(kube_pod_container_status_restarts_total{namespace="default",pod=~".*-service-.*|api-gateway-.*"}[15m]) * 60 * 15 > 3
+            for: 5m
+            labels:
+              severity: warning
+              component: service
+            annotations:
+              summary: "Pod {{ $labels.pod }} is restarting frequently"
+              description: "Pod {{ $labels.pod }} has restarted {{ $value | humanize }} times in the last 15 minutes."
+
+          # Pod crash looping
+          - alert: PodCrashLooping
+            expr: |
+              rate(kube_pod_container_status_restarts_total{namespace="default",pod=~".*-service-.*|api-gateway-.*"}[15m]) * 60 * 15 > 5
+            for: 5m
+            labels:
+              severity: critical
+              component: service
+            annotations:
+              summary: "Pod {{ $labels.pod }} is crash looping"
+              description: "Pod {{ $labels.pod }} has restarted {{ $value | humanize }} times in the last 15 minutes."
+
+          # Pod not ready
+          - alert: PodNotReady
+            expr: |
+              kube_pod_status_phase{namespace="default",pod=~".*-service-.*|api-gateway-.*",phase!="Running"} == 1
+            for: 5m
+            labels:
+              severity: warning
+              component: service
+            annotations:
+              summary: "Pod {{ $labels.pod }} is not ready"
+              description: "Pod {{ $labels.pod }} has been in {{ $labels.phase }} state for more than 5 minutes."
+
+          # API Gateway specific alerts
+          - alert: APIGatewayHighConnectionCount
+            expr: gateway_active_connections{job="api-gateway"} > 1000
+            for: 5m
+            labels:
+              severity: warning
+              component: api-gateway
+            annotations:
+              summary: "API Gateway has high connection count"
+              description: "API Gateway has {{ $value }} active connections (threshold: 1000)."
+
+          # Service dependency failure
+          - alert: ServiceDependencyFailure
+            expr: |
+              sum(rate(http_requests_total{job=~".*-service",status=~"5.."}[5m])) by (job, upstream_service)
+              /
+              sum(rate(http_requests_total{job=~".*-service"}[5m])) by (job, upstream_service)
+              > 0.1
+            for: 5m
+            labels:
+              severity: warning
+              component: service
+            annotations:
+              summary: "Service {{ $labels.job }} experiencing failures calling {{ $labels.upstream_service }}"
+              description: "{{ $labels.job }} is experiencing {{ $value | humanizePercentage }} failure rate when calling {{ $labels.upstream_service }}."

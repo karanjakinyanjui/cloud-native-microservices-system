@@ -1,0 +1,321 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: user-db-postgresql
+  namespace: default
+  labels:
+    app.kubernetes.io/name: user-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+    app.kubernetes.io/version: "16"
+spec:
+  serviceName: user-db-postgresql-headless
+  replicas: 3
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user-db
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: user-db
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: microservices-system
+        app.kubernetes.io/version: "16"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security Context
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsNonRoot: true
+
+      # Pod Anti-Affinity - spread pods across different nodes
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - user-db
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      - database
+              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - user-db
+                topologyKey: topology.kubernetes.io/zone
+
+      # Init Container - prepare data directory and initialize database
+      initContainers:
+        - name: init-chmod-data
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Initializing data directory permissions..."
+              chown -R 999:999 /var/lib/postgresql/data
+              chmod 0700 /var/lib/postgresql/data
+              echo "Permissions set successfully"
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+
+        - name: init-db-setup
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Checking if database needs initialization..."
+              if [ -f /var/lib/postgresql/data/PG_VERSION ]; then
+                echo "Database already initialized, skipping..."
+              else
+                echo "First-time initialization will be done by main container"
+              fi
+              # Copy custom postgresql.conf if provided
+              if [ -f /config/postgresql.conf ]; then
+                echo "Copying custom postgresql.conf..."
+                cp /config/postgresql.conf /var/lib/postgresql/data/postgresql.conf.custom
+              fi
+              if [ -f /config/pg_hba.conf ]; then
+                echo "Copying custom pg_hba.conf..."
+                cp /config/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf.custom
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /config
+
+      containers:
+        # Main PostgreSQL Container
+        - name: postgresql
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_REPLICATION_USER
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: POSTGRES_REPLICATION_USER
+            - name: POSTGRES_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: POSTGRES_REPLICATION_PASSWORD
+            - name: POSTGRES_INITDB_ARGS
+              value: "--encoding=UTF8 --locale=en_US.utf8"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # Resource Limits
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+
+          # Liveness Probe - restart container if PostgreSQL is dead
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 6
+
+          # Readiness Probe - mark pod ready when PostgreSQL can accept connections
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - -e
+                - |
+                  exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+                  [ -f /var/lib/postgresql/data/pgdata/postmaster.pid ]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 6
+
+          # Startup Probe - give PostgreSQL time to start (especially for large databases)
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 30
+
+          # Volume Mounts
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /config
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+            - name: wal-archive
+              mountPath: /var/lib/postgresql/wal-archive
+            - name: backup
+              mountPath: /backups
+
+          # Lifecycle hooks
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Apply custom configs if they exist
+                    if [ -f /var/lib/postgresql/data/postgresql.conf.custom ]; then
+                      cat /var/lib/postgresql/data/postgresql.conf.custom >> /var/lib/postgresql/data/pgdata/postgresql.conf
+                    fi
+                    if [ -f /var/lib/postgresql/data/pg_hba.conf.custom ]; then
+                      cp /var/lib/postgresql/data/pg_hba.conf.custom /var/lib/postgresql/data/pgdata/pg_hba.conf
+                    fi
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Graceful shutdown
+                    su-exec postgres pg_ctl stop -D /var/lib/postgresql/data/pgdata -m fast -w -t 60
+
+        # PostgreSQL Exporter for Prometheus metrics (optional but recommended)
+        - name: metrics
+          image: prometheuscommunity/postgres-exporter:v0.15.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9187
+              protocol: TCP
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-secret
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+      # Volumes
+      volumes:
+        - name: config
+          configMap:
+            name: user-db-config
+            defaultMode: 0755
+        - name: init-scripts
+          configMap:
+            name: user-db-config
+            items:
+              - key: init-db.sh
+                path: init-db.sh
+            defaultMode: 0755
+        - name: wal-archive
+          emptyDir: {}
+        - name: backup
+          persistentVolumeClaim:
+            claimName: user-db-backup-pvc
+
+      # Termination Grace Period
+      terminationGracePeriodSeconds: 60
+
+  # Volume Claim Templates - creates PVCs for each pod
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: user-db
+          app.kubernetes.io/component: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 10Gi

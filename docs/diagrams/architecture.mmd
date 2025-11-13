@@ -1,0 +1,114 @@
+```mermaid
+graph TB
+    subgraph "External Layer"
+        Client[Web Browser/Mobile App]
+        External[External Services<br/>Payment Gateways]
+    end
+
+    subgraph "Ingress Layer"
+        Ingress[Nginx Ingress Controller<br/>TLS Termination]
+        CertManager[Cert Manager<br/>SSL Certificates]
+    end
+
+    subgraph "API Layer"
+        Gateway[API Gateway<br/>Port: 3000<br/>Rate Limiting, Auth, Routing]
+    end
+
+    subgraph "Microservices Layer"
+        Auth[Auth Service<br/>Port: 3001<br/>JWT Generation]
+        User[User Service<br/>Port: 3002<br/>User Profiles]
+        Product[Product Service<br/>Port: 3003<br/>Catalog & Inventory]
+        Order[Order Service<br/>Port: 3004<br/>Order Management]
+        Payment[Payment Service<br/>Port: 3005<br/>Payment Processing]
+        Notification[Notification Service<br/>Port: 3006<br/>Email/SMS/Push]
+    end
+
+    subgraph "Service Mesh"
+        Istio[Istio/Linkerd<br/>mTLS<br/>Traffic Management<br/>Observability]
+    end
+
+    subgraph "Data Layer"
+        AuthDB[(Auth DB<br/>PostgreSQL)]
+        UserDB[(User DB<br/>PostgreSQL)]
+        ProductDB[(Product DB<br/>PostgreSQL)]
+        OrderDB[(Order DB<br/>PostgreSQL)]
+        PaymentDB[(Payment DB<br/>PostgreSQL)]
+        NotificationDB[(Notification DB<br/>PostgreSQL)]
+        Redis[(Redis Cache<br/>Sessions, Rate Limiting)]
+    end
+
+    subgraph "Message Queue"
+        MessageBroker[RabbitMQ/Kafka<br/>Event-Driven Communication]
+    end
+
+    subgraph "Observability Stack"
+        Prometheus[Prometheus<br/>Metrics Collection]
+        Grafana[Grafana<br/>Dashboards & Alerts]
+        Jaeger[Jaeger<br/>Distributed Tracing]
+        Logs[ELK Stack<br/>Log Aggregation]
+    end
+
+    Client -->|HTTPS| Ingress
+    CertManager -.->|Manages Certs| Ingress
+    Ingress -->|HTTP| Gateway
+
+    Gateway -->|REST/gRPC| Istio
+    Istio -->|Routes| Auth
+    Istio -->|Routes| User
+    Istio -->|Routes| Product
+    Istio -->|Routes| Order
+    Istio -->|Routes| Payment
+    Istio -->|Routes| Notification
+
+    Auth --> AuthDB
+    User --> UserDB
+    Product --> ProductDB
+    Order --> OrderDB
+    Payment --> PaymentDB
+    Notification --> NotificationDB
+
+    Gateway --> Redis
+    Order --> MessageBroker
+    Payment --> MessageBroker
+    Notification --> MessageBroker
+
+    Payment -->|Webhook| External
+
+    Auth -.->|Metrics| Prometheus
+    User -.->|Metrics| Prometheus
+    Product -.->|Metrics| Prometheus
+    Order -.->|Metrics| Prometheus
+    Payment -.->|Metrics| Prometheus
+    Notification -.->|Metrics| Prometheus
+    Gateway -.->|Metrics| Prometheus
+
+    Prometheus -->|Visualize| Grafana
+
+    Gateway -.->|Traces| Jaeger
+    Auth -.->|Traces| Jaeger
+    User -.->|Traces| Jaeger
+    Product -.->|Traces| Jaeger
+    Order -.->|Traces| Jaeger
+    Payment -.->|Traces| Jaeger
+    Notification -.->|Traces| Jaeger
+
+    Gateway -.->|Logs| Logs
+    Auth -.->|Logs| Logs
+    User -.->|Logs| Logs
+    Product -.->|Logs| Logs
+    Order -.->|Logs| Logs
+    Payment -.->|Logs| Logs
+    Notification -.->|Logs| Logs
+
+    style Client fill:#e1f5ff
+    style Gateway fill:#fff3e0
+    style Auth fill:#f3e5f5
+    style User fill:#f3e5f5
+    style Product fill:#f3e5f5
+    style Order fill:#f3e5f5
+    style Payment fill:#f3e5f5
+    style Notification fill:#f3e5f5
+    style Prometheus fill:#e8f5e9
+    style Grafana fill:#e8f5e9
+    style Jaeger fill:#e8f5e9
+```

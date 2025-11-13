@@ -1,0 +1,45 @@
+---
+# This file documents the PVC configuration for Elasticsearch
+# The actual PVCs are created automatically by the StatefulSet
+# using volumeClaimTemplates defined in statefulset.yaml
+#
+# Each Elasticsearch pod will have its own PVC with the following specs:
+# - Name pattern: data-elasticsearch-{0,1,2}
+# - Access Mode: ReadWriteOnce
+# - Storage: 100Gi
+# - Storage Class: standard (adjust based on your cluster)
+#
+# To manually create PVCs (if needed for migration or backup):
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-backup
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: backup
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 200Gi
+  storageClassName: nfs  # Use a storage class that supports ReadWriteMany
+---
+# Example: Manual PVC for snapshot repository
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-snapshots
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: snapshots
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: nfs

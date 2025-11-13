@@ -1,0 +1,262 @@
+---
+# Network policy for Jaeger Collector
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jaeger-collector
+  namespace: default
+  labels:
+    app: jaeger
+    component: collector
+spec:
+  podSelector:
+    matchLabels:
+      app: jaeger
+      component: collector
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app: jaeger
+          component: agent
+    ports:
+    - protocol: TCP
+      port: 14250  # gRPC
+    - protocol: TCP
+      port: 14268  # HTTP
+    - protocol: TCP
+      port: 4317   # OTLP gRPC
+    - protocol: TCP
+      port: 4318   # OTLP HTTP
+  # Allow traffic from instrumented services (direct submission)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 14268
+    - protocol: TCP
+      port: 9411   # Zipkin
+  # Allow Prometheus scraping
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 14269  # Metrics
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow connection to Elasticsearch
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # Allow connection to Prometheus
+  - to:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+---
+# Network policy for Jaeger Query
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jaeger-query
+  namespace: default
+  labels:
+    app: jaeger
+    component: query
+spec:
+  podSelector:
+    matchLabels:
+      app: jaeger
+      component: query
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow UI access from ingress controller
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 16686
+  # Allow internal cluster access
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 16686
+  # Allow Prometheus scraping
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 16687  # Admin/metrics
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow connection to Elasticsearch
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9200
+  # Allow connection to Prometheus
+  - to:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+---
+# Network policy for Jaeger Agent
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jaeger-agent
+  namespace: default
+  labels:
+    app: jaeger
+    component: agent
+spec:
+  podSelector:
+    matchLabels:
+      app: jaeger
+      component: agent
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from any pod (agents receive from all services)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 6831   # Thrift compact
+    - protocol: UDP
+      port: 6832   # Thrift binary
+    - protocol: TCP
+      port: 5778   # Config
+  # Allow Prometheus scraping
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 14271  # Metrics
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow connection to collectors
+  - to:
+    - podSelector:
+        matchLabels:
+          app: jaeger
+          component: collector
+    ports:
+    - protocol: TCP
+      port: 14250
+---
+# Network policy for Elasticsearch
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: elasticsearch-tracing
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: tracing-storage
+spec:
+  podSelector:
+    matchLabels:
+      app: elasticsearch
+      component: tracing-storage
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from Jaeger components
+  - from:
+    - podSelector:
+        matchLabels:
+          app: jaeger
+    ports:
+    - protocol: TCP
+      port: 9200  # HTTP API
+  # Allow inter-node communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9300  # Transport
+  # Allow Prometheus monitoring
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9200
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow inter-node communication
+  - to:
+    - podSelector:
+        matchLabels:
+          app: elasticsearch
+    ports:
+    - protocol: TCP
+      port: 9300

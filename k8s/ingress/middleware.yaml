@@ -1,0 +1,511 @@
+# Ingress Middleware Configurations
+# These configurations provide reusable middleware components for rate limiting,
+# authentication, CORS, and security headers that can be applied to Ingress resources.
+
+---
+# ============================================================================
+# Rate Limiting Configurations
+# ============================================================================
+
+# Basic Auth Secret for protected endpoints
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-auth-secret
+  namespace: default
+type: Opaque
+data:
+  # Username: admin, Password: admin123
+  # Generate with: htpasswd -nb admin admin123 | base64
+  auth: YWRtaW46JGFwcjEkSDY1dnFsRHMkRWdIMGlveC85TVBwVTF3L2hWeEhVLwo=
+
+---
+# Basic Auth Secret for monitoring endpoints
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitoring-basic-auth
+  namespace: default
+type: Opaque
+data:
+  # Username: monitoring, Password: monitor123
+  # Generate with: htpasswd -nb monitoring monitor123 | base64
+  auth: bW9uaXRvcmluZzokYXByMSRMbjcuRjFLYyRrTXhaTy9VQ2hBaGxnclcvdTdMMk0uCg==
+
+---
+# ============================================================================
+# Network Policies for Ingress Controller
+# ============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-controller-policy
+  namespace: ingress-nginx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/component: controller
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from anywhere to ingress controller
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 8443
+    - protocol: TCP
+      port: 10254
+  egress:
+  # Allow egress to all backend services
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 9090
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# ============================================================================
+# Rate Limiting ConfigMaps
+# ============================================================================
+
+# Rate limit configuration for API endpoints
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rate-limit-config
+  namespace: default
+  annotations:
+    description: "Rate limiting configuration for different API tiers"
+data:
+  # Public API endpoints - stricter limits
+  public-api-rps: "10"    # Requests per second
+  public-api-rpm: "100"   # Requests per minute
+  public-api-burst: "20"  # Burst multiplier
+
+  # Authenticated API endpoints - moderate limits
+  auth-api-rps: "50"
+  auth-api-rpm: "1000"
+  auth-api-burst: "100"
+
+  # Internal API endpoints - relaxed limits
+  internal-api-rps: "200"
+  internal-api-rpm: "5000"
+  internal-api-burst: "500"
+
+  # WebSocket connections - connection limits
+  websocket-connections: "1000"
+
+---
+# ============================================================================
+# CORS Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cors-config
+  namespace: default
+  annotations:
+    description: "CORS configuration for different environments"
+data:
+  # Production CORS settings
+  prod-allowed-origins: "https://example.com,https://www.example.com,https://app.example.com"
+  prod-allowed-methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  prod-allowed-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-Trace-Id,X-Request-ID"
+  prod-allow-credentials: "true"
+  prod-max-age: "3600"
+
+  # Development CORS settings (more permissive)
+  dev-allowed-origins: "*"
+  dev-allowed-methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH,HEAD"
+  dev-allowed-headers: "*"
+  dev-allow-credentials: "false"
+  dev-max-age: "86400"
+
+---
+# ============================================================================
+# Security Headers Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-headers-config
+  namespace: default
+  annotations:
+    description: "Security headers configuration"
+data:
+  # Content Security Policy
+  content-security-policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+
+  # Feature Policy / Permissions Policy
+  permissions-policy: "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), cross-origin-isolated=(), display-capture=(), document-domain=(), encrypted-media=(), execution-while-not-rendered=(), execution-while-out-of-viewport=(), fullscreen=(), geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), navigation-override=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()"
+
+  # Referrer Policy
+  referrer-policy: "strict-origin-when-cross-origin"
+
+  # X-Frame-Options
+  x-frame-options: "DENY"
+
+  # X-Content-Type-Options
+  x-content-type-options: "nosniff"
+
+  # X-XSS-Protection
+  x-xss-protection: "1; mode=block"
+
+---
+# ============================================================================
+# IP Whitelist Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ip-whitelist-config
+  namespace: default
+  annotations:
+    description: "IP whitelist for restricted endpoints"
+data:
+  # Internal network ranges
+  internal-networks: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+  # Office IP ranges (example)
+  office-ips: "203.0.113.0/24,198.51.100.0/24"
+
+  # Cloud provider IP ranges (example)
+  cloud-ips: "52.0.0.0/8,54.0.0.0/8"
+
+  # Admin access IPs (example)
+  admin-ips: "203.0.113.10/32,198.51.100.20/32"
+
+  # Monitoring services
+  monitoring-ips: "10.0.1.0/24"
+
+---
+# ============================================================================
+# Request Size Limits
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: request-limits-config
+  namespace: default
+  annotations:
+    description: "Request size and timeout limits"
+data:
+  # File upload endpoints - larger size
+  upload-max-size: "100m"
+  upload-timeout: "300"
+
+  # API endpoints - standard size
+  api-max-size: "10m"
+  api-timeout: "60"
+
+  # Webhook endpoints - small size
+  webhook-max-size: "1m"
+  webhook-timeout: "30"
+
+---
+# ============================================================================
+# Authentication Middleware Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-middleware-config
+  namespace: default
+  annotations:
+    description: "Authentication middleware configuration"
+data:
+  # JWT configuration
+  jwt-issuer: "https://auth.example.com"
+  jwt-audience: "api.example.com"
+  jwt-algorithm: "RS256"
+
+  # OAuth2 configuration
+  oauth2-provider: "https://oauth.example.com"
+  oauth2-client-id: "your-client-id"
+  oauth2-redirect-uri: "https://example.com/oauth/callback"
+
+  # Session configuration
+  session-timeout: "3600"
+  session-cookie-name: "session_id"
+  session-cookie-secure: "true"
+  session-cookie-httponly: "true"
+  session-cookie-samesite: "Strict"
+
+---
+# ============================================================================
+# Circuit Breaker Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: circuit-breaker-config
+  namespace: default
+  annotations:
+    description: "Circuit breaker configuration for upstream services"
+data:
+  # Circuit breaker thresholds
+  error-threshold: "50"           # Percentage of errors to open circuit
+  timeout-threshold: "5"          # Seconds
+  open-duration: "30"             # Seconds to keep circuit open
+  half-open-requests: "3"         # Number of requests to test in half-open state
+
+  # Retry configuration
+  max-retries: "3"
+  retry-timeout: "2"
+  retry-backoff: "exponential"
+
+---
+# ============================================================================
+# Cache Control Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cache-control-config
+  namespace: default
+  annotations:
+    description: "Cache control headers for different content types"
+data:
+  # Static assets - long cache
+  static-cache-control: "public, max-age=31536000, immutable"
+
+  # API responses - short cache
+  api-cache-control: "private, max-age=60, must-revalidate"
+
+  # HTML pages - no cache
+  html-cache-control: "no-cache, no-store, must-revalidate"
+
+  # Images - moderate cache
+  image-cache-control: "public, max-age=86400"
+
+---
+# ============================================================================
+# Custom Error Response Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: error-response-config
+  namespace: default
+  annotations:
+    description: "Custom error response messages"
+data:
+  error-404: |
+    {
+      "error": {
+        "code": 404,
+        "message": "Resource not found",
+        "details": "The requested resource could not be found on this server"
+      }
+    }
+
+  error-429: |
+    {
+      "error": {
+        "code": 429,
+        "message": "Too many requests",
+        "details": "You have exceeded the rate limit. Please try again later"
+      }
+    }
+
+  error-500: |
+    {
+      "error": {
+        "code": 500,
+        "message": "Internal server error",
+        "details": "An unexpected error occurred. Please try again later"
+      }
+    }
+
+  error-502: |
+    {
+      "error": {
+        "code": 502,
+        "message": "Bad gateway",
+        "details": "The server received an invalid response from the upstream server"
+      }
+    }
+
+  error-503: |
+    {
+      "error": {
+        "code": 503,
+        "message": "Service unavailable",
+        "details": "The service is temporarily unavailable. Please try again later"
+      }
+    }
+
+  error-504: |
+    {
+      "error": {
+        "code": 504,
+        "message": "Gateway timeout",
+        "details": "The server did not receive a timely response from the upstream server"
+      }
+    }
+
+---
+# ============================================================================
+# Request/Response Transformation
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transformation-config
+  namespace: default
+  annotations:
+    description: "Request and response transformation rules"
+data:
+  # Request headers to add
+  add-request-headers: "X-Forwarded-Proto: https,X-Real-IP: $remote_addr,X-Request-Start: $msec"
+
+  # Request headers to remove
+  remove-request-headers: "X-Powered-By,Server"
+
+  # Response headers to add
+  add-response-headers: "X-Content-Type-Options: nosniff,X-Frame-Options: DENY"
+
+  # Response headers to remove
+  remove-response-headers: "X-AspNet-Version,X-AspNetMvc-Version"
+
+---
+# ============================================================================
+# Geo-blocking Configuration (Optional)
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: geo-blocking-config
+  namespace: default
+  annotations:
+    description: "Geo-blocking configuration"
+data:
+  # Countries to block (ISO 3166-1 alpha-2 codes)
+  blocked-countries: "XX,YY,ZZ"
+
+  # Countries to allow (if using allowlist instead of blocklist)
+  allowed-countries: "US,CA,GB,DE,FR"
+
+  # Geo-blocking mode: "block" or "allow"
+  mode: "allow"
+
+---
+# ============================================================================
+# WAF (Web Application Firewall) Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: waf-config
+  namespace: default
+  annotations:
+    description: "Web Application Firewall configuration"
+data:
+  # ModSecurity rules
+  enable-modsecurity: "true"
+  enable-owasp-crs: "true"
+
+  # SQL Injection protection
+  block-sql-injection: "true"
+
+  # XSS protection
+  block-xss: "true"
+
+  # Path traversal protection
+  block-path-traversal: "true"
+
+  # Command injection protection
+  block-command-injection: "true"
+
+  # Suspicious user agents
+  block-user-agents: "sqlmap,nikto,nmap,masscan,nessus,openvas,metasploit"
+
+  # Suspicious patterns in URLs
+  block-url-patterns: "eval\\(,base64_decode,system\\(,exec\\("
+
+---
+# ============================================================================
+# Health Check Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-check-config
+  namespace: default
+  annotations:
+    description: "Health check configuration for upstream services"
+data:
+  # Health check settings
+  health-check-interval: "10"     # Seconds
+  health-check-timeout: "5"       # Seconds
+  health-check-fails: "3"         # Failures before marking unhealthy
+  health-check-passes: "2"        # Passes before marking healthy
+
+  # Health check paths
+  api-health-path: "/health"
+  api-ready-path: "/ready"
+
+---
+# ============================================================================
+# Monitoring and Logging Configuration
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-config
+  namespace: default
+  annotations:
+    description: "Monitoring and logging configuration"
+data:
+  # Access log configuration
+  access-log-enabled: "true"
+  access-log-format: "json"
+  access-log-buffer: "32k"
+
+  # Error log configuration
+  error-log-level: "warn"
+
+  # Request tracing
+  enable-tracing: "true"
+  trace-sample-rate: "0.1"  # Sample 10% of requests
+
+  # Metrics
+  enable-metrics: "true"
+  metrics-per-host: "false"
+
+  # Request ID header
+  request-id-header: "X-Request-ID"
+  generate-request-id: "true"

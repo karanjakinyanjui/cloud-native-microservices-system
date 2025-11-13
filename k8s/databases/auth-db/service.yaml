@@ -1,0 +1,76 @@
+---
+# Headless Service for StatefulSet (for pod discovery and stable network identities)
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-db-postgresql-headless
+  namespace: default
+  labels:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service
+  publishNotReadyAddresses: true
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+---
+# Regular ClusterIP Service (for application access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-db-postgresql
+  namespace: default
+  labels:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+---
+# Service for read-only replicas (optional - for read scaling)
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-db-postgresql-readonly
+  namespace: default
+  labels:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+    app.kubernetes.io/role: replica
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database
+    # Add label for replicas only (would need to be set on replica pods)

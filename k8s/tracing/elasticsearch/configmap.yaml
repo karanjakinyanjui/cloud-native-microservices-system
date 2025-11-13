@@ -1,0 +1,104 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-config
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: tracing-storage
+data:
+  elasticsearch.yml: |
+    cluster.name: jaeger-elasticsearch
+    network.host: 0.0.0.0
+
+    # Discovery settings
+    discovery.seed_hosts: elasticsearch-headless
+
+    # Security settings (disabled for simplicity)
+    xpack.security.enabled: false
+    xpack.security.enrollment.enabled: false
+    xpack.security.http.ssl.enabled: false
+    xpack.security.transport.ssl.enabled: false
+
+    # Performance settings
+    bootstrap.memory_lock: false
+
+    # Index settings for Jaeger
+    indices.memory.index_buffer_size: 30%
+    indices.memory.min_index_buffer_size: 96mb
+
+    # Thread pool settings
+    thread_pool.write.queue_size: 1000
+    thread_pool.search.queue_size: 1000
+
+    # HTTP settings
+    http.cors.enabled: true
+    http.cors.allow-origin: "*"
+    http.max_content_length: 100mb
+
+    # Circuit breaker settings
+    indices.breaker.total.limit: 70%
+    indices.breaker.request.limit: 40%
+    indices.breaker.fielddata.limit: 40%
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-curator-config
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: curator
+data:
+  action_file.yml: |
+    ---
+    actions:
+      1:
+        action: delete_indices
+        description: >-
+          Delete Jaeger indices older than 7 days
+        options:
+          ignore_empty_list: True
+          disable_action: False
+        filters:
+        - filtertype: pattern
+          kind: prefix
+          value: jaeger-span-
+        - filtertype: age
+          source: name
+          direction: older
+          timestring: '%Y-%m-%d'
+          unit: days
+          unit_count: 7
+      2:
+        action: delete_indices
+        description: >-
+          Delete Jaeger service indices older than 7 days
+        options:
+          ignore_empty_list: True
+          disable_action: False
+        filters:
+        - filtertype: pattern
+          kind: prefix
+          value: jaeger-service-
+        - filtertype: age
+          source: name
+          direction: older
+          timestring: '%Y-%m-%d'
+          unit: days
+          unit_count: 7
+  config.yml: |
+    ---
+    client:
+      hosts:
+        - elasticsearch
+      port: 9200
+      url_prefix:
+      use_ssl: False
+      ssl_no_validate: False
+      timeout: 30
+      master_only: False
+    logging:
+      loglevel: INFO
+      logformat: default

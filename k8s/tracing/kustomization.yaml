@@ -1,0 +1,64 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: jaeger-tracing
+  annotations:
+    description: "Distributed tracing with Jaeger for microservices"
+
+namespace: default
+
+resources:
+  # All-in-one deployment (for development/testing)
+  - jaeger-all-in-one.yaml
+
+  # Configuration
+  - configmap.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: observability
+  app.kubernetes.io/managed-by: kustomize
+
+configMapGenerator:
+  - name: jaeger-environment
+    literals:
+      - ENVIRONMENT=production
+      - JAEGER_VERSION=1.51
+      - RETENTION_DAYS=7
+
+# Patches for different environments
+patches:
+  - target:
+      kind: Deployment
+      name: jaeger-all-in-one
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/config.linkerd.io~1skip-outbound-ports
+        value: "14250,14268,6831,6832"
+
+# Resource transformations
+images:
+  - name: jaegertracing/all-in-one
+    newTag: "1.51"
+
+# Replicas for scaling
+replicas:
+  - name: jaeger-all-in-one
+    count: 1
+
+# Variables for different environments
+vars:
+  - name: JAEGER_COLLECTOR_SERVICE
+    objref:
+      kind: Service
+      name: jaeger-collector
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  - name: JAEGER_QUERY_SERVICE
+    objref:
+      kind: Service
+      name: jaeger-query
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name

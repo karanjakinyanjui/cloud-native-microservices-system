@@ -1,0 +1,149 @@
+# CODEOWNERS - Code ownership and automatic PR review assignment
+#
+# This file defines who owns specific parts of the codebase
+# and automatically requests reviews from them when PRs modify those files.
+#
+# Format: path/to/file @username @org/team-name
+# More specific patterns override less specific ones
+
+# Default owners for everything in the repo
+# These users will be requested for review when someone opens a PR
+* @devops-team
+
+# CI/CD and Infrastructure
+/.github/ @devops-team @platform-team
+/.github/workflows/ @devops-team
+/k8s/ @devops-team @platform-team
+/scripts/ @devops-team
+/docker-compose.yml @devops-team
+/Dockerfile @devops-team
+
+# Documentation
+/docs/ @tech-writers @devops-team
+*.md @tech-writers
+/README.md @devops-team @tech-writers
+
+# API Gateway
+/services/api-gateway/ @backend-team @api-gateway-owner
+/services/api-gateway/src/routes/ @backend-team
+/services/api-gateway/src/middleware/ @backend-team @security-team
+
+# Authentication Service
+/services/auth-service/ @backend-team @security-team @auth-owner
+/services/auth-service/src/controllers/ @backend-team @security-team
+/services/auth-service/src/middleware/auth.ts @security-team
+
+# User Service
+/services/user-service/ @backend-team @user-service-owner
+/services/user-service/src/models/ @backend-team
+/services/user-service/src/controllers/ @backend-team
+
+# Product Service
+/services/product-service/ @backend-team @product-team @product-service-owner
+/services/product-service/src/models/ @backend-team @product-team
+/services/product-service/src/controllers/ @backend-team @product-team
+
+# Order Service
+/services/order-service/ @backend-team @order-team @order-service-owner
+/services/order-service/src/models/ @backend-team @order-team
+/services/order-service/src/controllers/ @backend-team @order-team
+
+# Payment Service
+/services/payment-service/ @backend-team @security-team @payments-team @payment-service-owner
+/services/payment-service/src/ @backend-team @security-team @payments-team
+
+# Notification Service
+/services/notification-service/ @backend-team @notifications-owner
+/services/notification-service/src/integrations/ @backend-team
+
+# Frontend
+/frontend/ @frontend-team @ui-ux-team
+/frontend/src/components/ @frontend-team
+/frontend/src/pages/ @frontend-team
+/frontend/src/styles/ @frontend-team @ui-ux-team
+
+# Database migrations and schemas
+**/migrations/ @backend-team @dba-team
+**/schema/ @backend-team @dba-team
+**/seeds/ @backend-team
+
+# Configuration files
+**/.env.example @devops-team
+**/config/ @devops-team @backend-team
+**/.eslintrc* @frontend-team @backend-team
+**/.prettierrc* @frontend-team @backend-team
+**/tsconfig.json @frontend-team @backend-team
+
+# Security-sensitive files
+**/*secret* @security-team @devops-team
+**/*auth* @security-team @backend-team
+**/*jwt* @security-team @backend-team
+**/*password* @security-team @backend-team
+**/*encryption* @security-team
+
+# Testing
+**/__tests__/ @backend-team @frontend-team
+**/*.test.ts @backend-team @frontend-team
+**/*.test.tsx @frontend-team
+**/*.spec.ts @backend-team @frontend-team
+**/jest.config.js @backend-team @frontend-team
+
+# Package management
+**/package.json @devops-team @backend-team @frontend-team
+**/package-lock.json @devops-team @backend-team @frontend-team
+
+# Kubernetes configurations
+/k8s/production/ @devops-team @platform-team @security-team
+/k8s/staging/ @devops-team @platform-team
+/k8s/*/secrets/ @security-team @devops-team
+/k8s/*/ingress.yaml @devops-team @platform-team
+/k8s/*/rbac/ @security-team @devops-team
+
+# Monitoring and Observability
+/k8s/monitoring/ @devops-team @sre-team
+/k8s/*/prometheus/ @devops-team @sre-team
+/k8s/*/grafana/ @devops-team @sre-team
+
+# Service Mesh
+/k8s/*/istio/ @devops-team @platform-team
+/k8s/*/linkerd/ @devops-team @platform-team
+
+# Build and deployment scripts
+/scripts/deploy.sh @devops-team
+/scripts/build.sh @devops-team
+/scripts/test.sh @devops-team @backend-team
+
+---
+
+# Team Definitions (for reference - configure these in GitHub)
+#
+# @devops-team - DevOps engineers responsible for infrastructure and CI/CD
+# @platform-team - Platform engineers managing Kubernetes and cloud infrastructure
+# @security-team - Security engineers reviewing security-sensitive changes
+# @backend-team - Backend developers working on microservices
+# @frontend-team - Frontend developers working on React application
+# @sre-team - Site reliability engineers for monitoring and observability
+# @tech-writers - Technical writers maintaining documentation
+# @dba-team - Database administrators
+# @ui-ux-team - UI/UX designers
+# @product-team - Product team members
+# @order-team - Order service specialists
+# @payments-team - Payment processing specialists
+#
+# Service Owners (Individual maintainers)
+# @api-gateway-owner
+# @auth-owner
+# @user-service-owner
+# @product-service-owner
+# @order-service-owner
+# @payment-service-owner
+# @notifications-owner
+
+---
+
+# Notes:
+# 1. More specific patterns override general patterns
+# 2. Multiple owners can be assigned (space-separated)
+# 3. All listed owners must approve for PR to be mergeable (if branch protection is enabled)
+# 4. Use teams (@org/team-name) rather than individuals for better maintainability
+# 5. Update this file when new services or components are added

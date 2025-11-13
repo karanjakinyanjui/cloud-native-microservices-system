@@ -1,0 +1,122 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Let's Encrypt Production Server
+    # WARNING: Has strict rate limits (50 certificates per registered domain per week)
+    # Use staging environment for testing first!
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+    # Email address for ACME registration
+    # IMPORTANT: Replace with your actual email address
+    # Let's Encrypt will use this to contact you about expiring certificates,
+    # and issues related to your account
+    email: admin@example.com
+
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-prod-private-key
+
+    # Enable the HTTP-01 challenge provider
+    solvers:
+    # HTTP-01 challenge solver - recommended for most use cases
+    - http01:
+        ingress:
+          class: nginx
+          podTemplate:
+            metadata:
+              labels:
+                app: cert-manager-solver
+            spec:
+              # Ensure solver pods are scheduled on Linux nodes
+              nodeSelector:
+                kubernetes.io/os: linux
+              # Resource limits for solver pods
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+
+    # DNS-01 challenge solver (optional, uncomment and configure if needed)
+    # Required for wildcard certificates (*.example.com)
+    # Also useful when HTTP-01 is not feasible (e.g., internal networks)
+    # - dns01:
+    #     # CloudFlare DNS provider
+    #     cloudflare:
+    #       email: admin@example.com
+    #       apiTokenSecretRef:
+    #         name: cloudflare-api-token
+    #         key: api-token
+    #   selector:
+    #     dnsZones:
+    #     - 'example.com'
+
+    # - dns01:
+    #     # AWS Route53 DNS provider
+    #     route53:
+    #       region: us-east-1
+    #       # Use IAM role (recommended for EKS)
+    #       # role: arn:aws:iam::ACCOUNT_ID:role/cert-manager
+    #       # Or use access keys (less secure)
+    #       accessKeyID: YOUR_ACCESS_KEY_ID
+    #       secretAccessKeySecretRef:
+    #         name: route53-credentials
+    #         key: secret-access-key
+    #   selector:
+    #     dnsZones:
+    #     - 'example.com'
+
+    # - dns01:
+    #     # Google Cloud DNS provider
+    #     cloudDNS:
+    #       project: my-gcp-project
+    #       serviceAccountSecretRef:
+    #         name: clouddns-service-account
+    #         key: key.json
+    #   selector:
+    #     dnsZones:
+    #     - 'example.com'
+
+    # - dns01:
+    #     # Azure DNS provider
+    #     azureDNS:
+    #       clientID: CLIENT_ID
+    #       clientSecretSecretRef:
+    #         name: azure-dns-sp
+    #         key: client-secret
+    #       subscriptionID: SUBSCRIPTION_ID
+    #       tenantID: TENANT_ID
+    #       resourceGroupName: RESOURCE_GROUP
+    #       hostedZoneName: example.com
+    #   selector:
+    #     dnsZones:
+    #     - 'example.com'
+
+---
+# Secret for storing DNS provider credentials (CloudFlare example)
+# Uncomment and apply if using DNS-01 challenge with CloudFlare
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: cloudflare-api-token
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   api-token: YOUR_CLOUDFLARE_API_TOKEN
+
+---
+# Secret for storing DNS provider credentials (AWS Route53 example)
+# Uncomment and apply if using DNS-01 challenge with Route53
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: route53-credentials
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   secret-access-key: YOUR_AWS_SECRET_ACCESS_KEY

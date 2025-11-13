@@ -1,0 +1,50 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: microservices-gateway
+  namespace: default
+  labels:
+    app: microservices
+    version: v1
+spec:
+  selector:
+    istio: ingressgateway # Use Istio default gateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+    # Uncomment below to redirect HTTP to HTTPS
+    # tls:
+    #   httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - "*"
+    tls:
+      mode: SIMPLE
+      credentialName: microservices-tls-secret # Secret must be created in istio-system namespace
+---
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: microservices-gateway-internal
+  namespace: default
+  labels:
+    app: microservices
+    version: v1
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 8080
+      name: http-internal
+      protocol: HTTP
+    hosts:
+    - "*.internal.local"
+    - "*.svc.cluster.local"

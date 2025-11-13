@@ -1,0 +1,352 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-sampling-configuration
+  namespace: default
+  labels:
+    app: jaeger
+    component: configuration
+data:
+  sampling-strategies.json: |
+    {
+      "default_strategy": {
+        "type": "probabilistic",
+        "param": 0.5
+      },
+      "service_strategies": [
+        {
+          "service": "user-service",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "service": "product-service",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "service": "order-service",
+          "type": "probabilistic",
+          "param": 0.8
+        },
+        {
+          "service": "payment-service",
+          "type": "probabilistic",
+          "param": 1.0
+        },
+        {
+          "service": "inventory-service",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "service": "notification-service",
+          "type": "probabilistic",
+          "param": 0.3
+        },
+        {
+          "service": "frontend",
+          "type": "probabilistic",
+          "param": 0.1
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-ui-configuration
+  namespace: default
+  labels:
+    app: jaeger
+    component: ui
+data:
+  ui-config.json: |
+    {
+      "monitor": {
+        "menuEnabled": true
+      },
+      "dependencies": {
+        "menuEnabled": true
+      },
+      "archiveEnabled": true,
+      "tracking": {
+        "gaID": null,
+        "trackErrors": true
+      },
+      "linkPatterns": [
+        {
+          "type": "logs",
+          "key": "logs",
+          "url": "http://grafana.default.svc.cluster.local/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Loki%22,%7B%22expr%22:%22%7Btrace_id%3D%5C%22#{traceID}%5C%22%7D%22%7D%5D",
+          "text": "View Logs in Grafana"
+        },
+        {
+          "type": "traces",
+          "key": "traces",
+          "url": "http://grafana.default.svc.cluster.local/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Jaeger%22,%7B%22query%22:%22#{traceID}%22%7D%5D",
+          "text": "View in Grafana"
+        }
+      ],
+      "search": {
+        "maxLookback": {
+          "label": "2 Days",
+          "value": "2d"
+        },
+        "maxLimit": 1500
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-collector-configuration
+  namespace: default
+  labels:
+    app: jaeger
+    component: collector
+data:
+  collector.yaml: |
+    # Collector configuration
+    collector:
+      # Number of collector workers
+      num-workers: 100
+      # Queue size for collector
+      queue-size: 5000
+      # Zipkin HTTP endpoint
+      zipkin:
+        host-port: :9411
+        keep-alive: true
+        max-request-body-size: 10485760  # 10MB
+      # OTLP configuration
+      otlp:
+        grpc:
+          host-port: :4317
+          max-recv-msg-size: 4194304  # 4MB
+          max-concurrent-streams: 100
+        http:
+          host-port: :4318
+          cors:
+            allowed-origins:
+              - "*"
+            allowed-headers:
+              - "*"
+
+    # Sampling configuration
+    sampling:
+      initial-sampling-probability: 0.5
+      target-samples-per-second: 1000000
+      strategy-refresh-interval: 1m
+
+    # Storage configuration
+    storage:
+      # Type: elasticsearch, cassandra, kafka, badger, memory
+      type: elasticsearch
+      elasticsearch:
+        server-urls: http://elasticsearch:9200
+        max-span-age: 168h  # 7 days
+        num-shards: 3
+        num-replicas: 1
+        bulk:
+          size: 5000000  # 5MB
+          workers: 10
+          actions: 1000
+          flush-interval: 200ms
+        index:
+          prefix: jaeger
+          date-separator: "-"
+          rollover: true
+        tags-as-fields:
+          all: false
+          include: "http.status_code,error"
+          dot-replacement: "@"
+        timeout: 10s
+        max-retries: 3
+        sniffer: false
+
+    # Metrics configuration
+    metrics:
+      backend: prometheus
+      http:
+        route: /metrics
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-agent-configuration
+  namespace: default
+  labels:
+    app: jaeger
+    component: agent
+data:
+  agent.yaml: |
+    # Agent configuration
+    reporter:
+      type: grpc
+      grpc:
+        host-port: jaeger-collector:14250
+        retry:
+          max-backoff: 5s
+        discovery:
+          min-peers: 3
+          conn-check-timeout: 1s
+
+    # Processor configuration
+    processor:
+      jaeger-compact:
+        server:
+          host-port: :6831
+          queue-size: 5000
+          max-packet-size: 65000
+          workers: 50
+      jaeger-binary:
+        server:
+          host-port: :6832
+          queue-size: 5000
+          max-packet-size: 65000
+          workers: 50
+
+    # Sampling strategies
+    sampling:
+      strategies-file: /etc/jaeger/sampling/sampling-strategies.json
+      strategies-reload-interval: 1m
+
+    # Agent tags
+    tags:
+      cluster: kubernetes
+      deployment.environment: production
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: elasticsearch-credentials
+  namespace: default
+  labels:
+    app: jaeger
+    component: storage
+type: Opaque
+stringData:
+  username: elastic
+  password: changeme
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-curator-config
+  namespace: default
+  labels:
+    app: jaeger
+    component: curator
+data:
+  actions.yaml: |
+    ---
+    # Delete Jaeger indices older than 7 days
+    actions:
+      1:
+        action: delete_indices
+        description: "Delete Jaeger span indices older than 7 days"
+        options:
+          ignore_empty_list: True
+          disable_action: False
+        filters:
+        - filtertype: pattern
+          kind: prefix
+          value: jaeger-span-
+        - filtertype: age
+          source: name
+          direction: older
+          timestring: '%Y-%m-%d'
+          unit: days
+          unit_count: 7
+      2:
+        action: delete_indices
+        description: "Delete Jaeger service indices older than 7 days"
+        options:
+          ignore_empty_list: True
+          disable_action: False
+        filters:
+        - filtertype: pattern
+          kind: prefix
+          value: jaeger-service-
+        - filtertype: age
+          source: name
+          direction: older
+          timestring: '%Y-%m-%d'
+          unit: days
+          unit_count: 7
+      3:
+        action: delete_indices
+        description: "Delete Jaeger dependencies indices older than 7 days"
+        options:
+          ignore_empty_list: True
+          disable_action: False
+        filters:
+        - filtertype: pattern
+          kind: prefix
+          value: jaeger-dependencies-
+        - filtertype: age
+          source: name
+          direction: older
+          timestring: '%Y-%m-%d'
+          unit: days
+          unit_count: 7
+  curator.yaml: |
+    ---
+    client:
+      hosts:
+        - elasticsearch
+      port: 9200
+      url_prefix:
+      use_ssl: False
+      ssl_no_validate: False
+      timeout: 30
+      master_only: False
+    logging:
+      loglevel: INFO
+      logformat: default
+      blacklist: ['elasticsearch', 'urllib3']
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: jaeger-es-index-cleaner
+  namespace: default
+  labels:
+    app: jaeger
+    component: index-cleaner
+spec:
+  schedule: "55 23 * * *"  # Run daily at 23:55
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: jaeger
+            component: index-cleaner
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: curator
+            image: bitnami/elasticsearch-curator:5.8.4
+            args:
+            - --config
+            - /etc/curator/curator.yaml
+            - /etc/curator/actions.yaml
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 200m
+                memory: 256Mi
+            volumeMounts:
+            - name: config
+              mountPath: /etc/curator
+          volumes:
+          - name: config
+            configMap:
+              name: jaeger-curator-config

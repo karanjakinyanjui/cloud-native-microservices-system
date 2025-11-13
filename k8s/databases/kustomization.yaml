@@ -1,0 +1,139 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: databases
+  annotations:
+    description: "PostgreSQL databases for microservices system"
+
+namespace: default
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: microservices-system
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  documentation: "https://github.com/your-org/cloud-native-microservices-system"
+
+resources:
+  # Storage Class for all databases
+  - storage-class.yaml
+
+  # Auth Database
+  - auth-db/secret.yaml
+  - auth-db/configmap.yaml
+  - auth-db/pvc.yaml
+  - auth-db/service.yaml
+  - auth-db/statefulset.yaml
+  - auth-db/backup-cronjob.yaml
+
+  # User Database
+  - user-db/secret.yaml
+  - user-db/configmap.yaml
+  - user-db/pvc.yaml
+  - user-db/service.yaml
+  - user-db/statefulset.yaml
+  - user-db/backup-cronjob.yaml
+
+  # Product Database
+  - product-db/secret.yaml
+  - product-db/configmap.yaml
+  - product-db/pvc.yaml
+  - product-db/service.yaml
+  - product-db/statefulset.yaml
+  - product-db/backup-cronjob.yaml
+
+  # Order Database
+  - order-db/secret.yaml
+  - order-db/configmap.yaml
+  - order-db/pvc.yaml
+  - order-db/service.yaml
+  - order-db/statefulset.yaml
+  - order-db/backup-cronjob.yaml
+
+  # Payment Database
+  - payment-db/secret.yaml
+  - payment-db/configmap.yaml
+  - payment-db/pvc.yaml
+  - payment-db/service.yaml
+  - payment-db/statefulset.yaml
+  - payment-db/backup-cronjob.yaml
+
+  # Notification Database
+  - notification-db/secret.yaml
+  - notification-db/configmap.yaml
+  - notification-db/pvc.yaml
+  - notification-db/service.yaml
+  - notification-db/statefulset.yaml
+  - notification-db/backup-cronjob.yaml
+
+# Configuration transformers
+configurations:
+  # Reference to a configuration file for custom transformers (optional)
+  # - kustomizeconfig.yaml
+
+# Patches (examples for different environments)
+# patchesStrategicMerge:
+#   - |-
+#     apiVersion: apps/v1
+#     kind: StatefulSet
+#     metadata:
+#       name: auth-db-postgresql
+#     spec:
+#       replicas: 1  # Override replicas for dev environment
+
+# Images (can be used to update image tags)
+# images:
+#   - name: postgres
+#     newTag: 16.1-alpine
+
+# Generators for secrets (alternative to YAML files)
+# secretGenerator:
+#   - name: auth-db-secret
+#     literals:
+#       - POSTGRES_USER=authuser
+#       - POSTGRES_PASSWORD=generated-password
+#       - POSTGRES_DB=authdb
+
+# ConfigMap generator (alternative to YAML files)
+# configMapGenerator:
+#   - name: postgres-common-config
+#     files:
+#       - postgresql.conf
+#       - pg_hba.conf
+
+# Replicas (for scaling all StatefulSets)
+# replicas:
+#   - name: auth-db-postgresql
+#     count: 3
+#   - name: user-db-postgresql
+#     count: 3
+
+# Resource quotas and limits
+# Can be applied via patches or separate files
+
+---
+# Usage Instructions:
+#
+# Deploy all databases:
+#   kubectl apply -k k8s/databases/
+#
+# Deploy with kustomize build:
+#   kustomize build k8s/databases/ | kubectl apply -f -
+#
+# Delete all databases:
+#   kubectl delete -k k8s/databases/
+#
+# View resources:
+#   kustomize build k8s/databases/
+#
+# Validate configuration:
+#   kustomize build k8s/databases/ | kubectl apply --dry-run=client -f -
+#
+# Create environment-specific overlays:
+#   k8s/databases/overlays/dev/kustomization.yaml
+#   k8s/databases/overlays/staging/kustomization.yaml
+#   k8s/databases/overlays/production/kustomization.yaml

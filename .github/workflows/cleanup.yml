@@ -1,0 +1,432 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run weekly on Sunday at 3 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      cleanup_type:
+        description: 'Type of cleanup to perform'
+        required: true
+        type: choice
+        options:
+          - all
+          - docker-images
+          - artifacts
+          - test-environments
+          - cache
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  cleanup-old-packages:
+    name: Cleanup Old Docker Images
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'docker-images'
+    strategy:
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    permissions:
+      packages: write
+
+    steps:
+      - name: Cleanup old images for ${{ matrix.component }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const packageName = '${{ matrix.component }}';
+            const daysToKeep = 30;
+            const minimumToKeep = 5;
+
+            console.log(`Cleaning up old versions of ${packageName}`);
+
+            // Get all versions of the package
+            const versions = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+              package_type: 'container',
+              package_name: `${{ github.repository }}/${packageName}`,
+              org: context.repo.owner,
+              per_page: 100
+            });
+
+            console.log(`Found ${versions.data.length} versions`);
+
+            // Filter versions to delete
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+            // Keep tagged versions (release tags) and recent versions
+            const versionsToDelete = versions.data
+              .filter(version => {
+                const createdAt = new Date(version.created_at);
+                const hasTag = version.metadata.container?.tags?.some(tag =>
+                  /^v?\d+\.\d+\.\d+$/.test(tag) // Semantic version tags
+                );
+                return createdAt < cutoffDate && !hasTag;
+              })
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(minimumToKeep); // Keep at least minimum versions
+
+            console.log(`Will delete ${versionsToDelete.length} old versions`);
+
+            // Delete old versions
+            for (const version of versionsToDelete) {
+              console.log(`Deleting version ${version.id} created at ${version.created_at}`);
+              try {
+                await github.rest.packages.deletePackageVersionForOrg({
+                  package_type: 'container',
+                  package_name: `${{ github.repository }}/${packageName}`,
+                  org: context.repo.owner,
+                  package_version_id: version.id
+                });
+                console.log(`Successfully deleted version ${version.id}`);
+              } catch (error) {
+                console.error(`Failed to delete version ${version.id}: ${error.message}`);
+              }
+            }
+
+  cleanup-workflow-runs:
+    name: Cleanup Old Workflow Runs
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'artifacts'
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Cleanup old workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const daysToKeep = 90;
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+            console.log(`Cleaning up workflow runs older than ${daysToKeep} days`);
+
+            const workflows = await github.rest.actions.listRepoWorkflows({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+
+            for (const workflow of workflows.data.workflows) {
+              console.log(`Processing workflow: ${workflow.name}`);
+
+              let page = 1;
+              let hasMore = true;
+
+              while (hasMore) {
+                const runs = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: workflow.id,
+                  per_page: 100,
+                  page: page
+                });
+
+                const oldRuns = runs.data.workflow_runs.filter(run => {
+                  const createdAt = new Date(run.created_at);
+                  return createdAt < cutoffDate && run.status === 'completed';
+                });
+
+                console.log(`Found ${oldRuns.length} old runs to delete`);
+
+                for (const run of oldRuns) {
+                  try {
+                    await github.rest.actions.deleteWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id
+                    });
+                    console.log(`Deleted workflow run ${run.id}`);
+                  } catch (error) {
+                    console.error(`Failed to delete run ${run.id}: ${error.message}`);
+                  }
+                }
+
+                hasMore = runs.data.workflow_runs.length === 100;
+                page++;
+              }
+            }
+
+  cleanup-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'artifacts'
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Cleanup old artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const daysToKeep = 30;
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+            console.log(`Cleaning up artifacts older than ${daysToKeep} days`);
+
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore) {
+              const artifacts = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                page: page
+              });
+
+              const oldArtifacts = artifacts.data.artifacts.filter(artifact => {
+                const createdAt = new Date(artifact.created_at);
+                return createdAt < cutoffDate;
+              });
+
+              console.log(`Found ${oldArtifacts.length} old artifacts to delete on page ${page}`);
+
+              for (const artifact of oldArtifacts) {
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  console.log(`Deleted artifact ${artifact.name} (${artifact.id})`);
+                } catch (error) {
+                  console.error(`Failed to delete artifact ${artifact.id}: ${error.message}`);
+                }
+              }
+
+              hasMore = artifacts.data.artifacts.length === 100;
+              page++;
+            }
+
+  cleanup-cache:
+    name: Cleanup GitHub Actions Cache
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'cache'
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Cleanup old cache entries
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const daysToKeep = 7;
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+            console.log(`Cleaning up cache entries older than ${daysToKeep} days`);
+
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            const oldCaches = caches.data.actions_caches.filter(cache => {
+              const createdAt = new Date(cache.created_at);
+              return createdAt < cutoffDate;
+            });
+
+            console.log(`Found ${oldCaches.length} old cache entries to delete`);
+
+            for (const cache of oldCaches) {
+              try {
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id
+                });
+                console.log(`Deleted cache ${cache.key} (${cache.id})`);
+              } catch (error) {
+                console.error(`Failed to delete cache ${cache.id}: ${error.message}`);
+              }
+            }
+
+  cleanup-test-namespaces:
+    name: Cleanup Test Kubernetes Namespaces
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'test-environments'
+
+    steps:
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Cleanup old test namespaces
+        run: |
+          echo "Cleaning up test namespaces..."
+
+          # Get all namespaces that match test pattern
+          TEST_NAMESPACES=$(kubectl get namespaces -o json | jq -r '.items[] | select(.metadata.name | test("^test-|^pr-")) | .metadata.name')
+
+          for namespace in $TEST_NAMESPACES; do
+            echo "Checking namespace: $namespace"
+
+            # Get namespace creation time
+            CREATED_AT=$(kubectl get namespace $namespace -o jsonpath='{.metadata.creationTimestamp}')
+            CREATED_TIMESTAMP=$(date -d "$CREATED_AT" +%s)
+            CURRENT_TIMESTAMP=$(date +%s)
+            AGE_DAYS=$(( ($CURRENT_TIMESTAMP - $CREATED_TIMESTAMP) / 86400 ))
+
+            echo "Namespace $namespace is $AGE_DAYS days old"
+
+            # Delete if older than 7 days
+            if [ $AGE_DAYS -gt 7 ]; then
+              echo "Deleting namespace $namespace"
+              kubectl delete namespace $namespace --timeout=5m || echo "Failed to delete $namespace"
+            fi
+          done
+
+          echo "Test namespace cleanup completed"
+
+  cleanup-pr-environments:
+    name: Cleanup Closed PR Environments
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.cleanup_type == 'all' ||
+      github.event.inputs.cleanup_type == 'test-environments'
+
+    permissions:
+      pull-requests: read
+
+    steps:
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Get closed PRs
+        id: closed-prs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              per_page: 100
+            });
+
+            const prNumbers = prs.data.map(pr => pr.number);
+            return prNumbers.join(',');
+
+      - name: Cleanup PR environments
+        run: |
+          echo "Cleaning up environments for closed PRs..."
+
+          # Get all PR namespaces
+          PR_NAMESPACES=$(kubectl get namespaces -o json | jq -r '.items[] | select(.metadata.name | test("^pr-[0-9]+$")) | .metadata.name')
+
+          CLOSED_PRS="${{ steps.closed-prs.outputs.result }}"
+          IFS=',' read -ra CLOSED_PR_ARRAY <<< "$CLOSED_PRS"
+
+          for namespace in $PR_NAMESPACES; do
+            PR_NUMBER=$(echo $namespace | sed 's/pr-//')
+
+            if [[ " ${CLOSED_PR_ARRAY[@]} " =~ " ${PR_NUMBER} " ]]; then
+              echo "Deleting namespace for closed PR #$PR_NUMBER"
+              kubectl delete namespace $namespace --timeout=5m || echo "Failed to delete $namespace"
+            fi
+          done
+
+          echo "PR environment cleanup completed"
+
+  cleanup-report:
+    name: Generate Cleanup Report
+    runs-on: ubuntu-latest
+    needs: [cleanup-old-packages, cleanup-workflow-runs, cleanup-artifacts, cleanup-cache, cleanup-test-namespaces]
+    if: always()
+
+    steps:
+      - name: Generate report
+        run: |
+          cat << EOF > cleanup-report.md
+          ## Cleanup Report - $(date +%Y-%m-%d)
+
+          ### Job Results
+
+          | Job | Status |
+          |-----|--------|
+          | Docker Images | ${{ needs.cleanup-old-packages.result }} |
+          | Workflow Runs | ${{ needs.cleanup-workflow-runs.result }} |
+          | Artifacts | ${{ needs.cleanup-artifacts.result }} |
+          | Cache | ${{ needs.cleanup-cache.result }} |
+          | Test Namespaces | ${{ needs.cleanup-test-namespaces.result }} |
+
+          **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          *Automated cleanup completed*
+          EOF
+
+          cat cleanup-report.md
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-report
+          path: cleanup-report.md
+          retention-days: 90
+
+  notify-cleanup:
+    name: Send Cleanup Notification
+    runs-on: ubuntu-latest
+    needs: [cleanup-report]
+    if: always() && github.event_name == 'schedule'
+
+    steps:
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Cleanup job completed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Weekly Cleanup Completed*\n\nOld artifacts, images, and test environments have been cleaned up.\n\n*Date:* $(date +%Y-%m-%d)"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

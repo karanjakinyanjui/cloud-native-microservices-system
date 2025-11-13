@@ -1,0 +1,16 @@
+# Ignore all certificate and key files
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Except placeholder files
+!placeholder.crt
+!placeholder.key
+
+# Ignore certificate signing requests
+*.csr
+
+# Ignore certificate authorities
+*.ca

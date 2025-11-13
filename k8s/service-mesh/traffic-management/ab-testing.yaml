@@ -1,0 +1,194 @@
+# A/B Testing Example for Frontend Application
+# Route traffic based on user attributes, cookies, or headers
+
+---
+# A/B Testing VirtualService
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: frontend-ab-testing
+  namespace: default
+  labels:
+    app: frontend
+    testing-strategy: ab-testing
+spec:
+  hosts:
+  - "*"
+  - "app.example.com"
+  gateways:
+  - microservices-gateway
+  http:
+  # Route users with experiment cookie to version B
+  - match:
+    - headers:
+        cookie:
+          regex: ".*experiment=version-b.*"
+    route:
+    - destination:
+        host: frontend
+        port:
+          number: 3000
+        subset: version-b
+      headers:
+        response:
+          add:
+            x-ab-test-version: "b"
+  # Route users from specific regions to version B
+  - match:
+    - headers:
+        x-user-region:
+          regex: "^(us-west|eu-central)$"
+    route:
+    - destination:
+        host: frontend
+        subset: version-b
+      headers:
+        response:
+          add:
+            x-ab-test-version: "b"
+            x-ab-test-reason: "region-based"
+  # Route premium users to version B
+  - match:
+    - headers:
+        x-user-tier:
+          exact: "premium"
+    route:
+    - destination:
+        host: frontend
+        subset: version-b
+      headers:
+        response:
+          add:
+            x-ab-test-version: "b"
+            x-ab-test-reason: "premium-user"
+  # Route mobile users to version B
+  - match:
+    - headers:
+        user-agent:
+          regex: ".*Mobile.*"
+    route:
+    - destination:
+        host: frontend
+        subset: version-b
+      weight: 50
+    - destination:
+        host: frontend
+        subset: version-a
+      weight: 50
+    headers:
+      response:
+        add:
+          x-ab-test-version: "mobile-split"
+  # Default traffic to version A (control group)
+  - route:
+    - destination:
+        host: frontend
+        port:
+          number: 3000
+        subset: version-a
+      headers:
+        response:
+          add:
+            x-ab-test-version: "a"
+
+---
+# A/B Testing for API endpoints
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: api-ab-testing
+  namespace: default
+  labels:
+    app: api-gateway
+    testing-strategy: ab-testing
+spec:
+  hosts:
+  - api-gateway
+  http:
+  # Test new API version with specific clients
+  - match:
+    - headers:
+        x-api-version:
+          exact: "v2"
+    - headers:
+        x-client-id:
+          regex: "^(client-1|client-2|client-3)$"
+    route:
+    - destination:
+        host: api-gateway
+        subset: v2
+      headers:
+        response:
+          add:
+            x-api-test-group: "beta"
+  # Percentage-based split for general traffic
+  - match:
+    - uri:
+        prefix: "/api/v1/products"
+    route:
+    - destination:
+        host: api-gateway
+        subset: v1
+      weight: 80
+    - destination:
+        host: api-gateway
+        subset: v2
+      weight: 20
+  # Default to stable version
+  - route:
+    - destination:
+        host: api-gateway
+        subset: v1
+
+---
+# DestinationRule for Frontend A/B Testing
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: frontend-ab-testing-dr
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  host: frontend
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+  - name: version-a
+    labels:
+      version: v1
+      experiment: control
+  - name: version-b
+    labels:
+      version: v2
+      experiment: treatment
+
+---
+# Session affinity for consistent user experience
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: frontend-session-affinity
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  host: frontend
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpCookie:
+          name: "user-session"
+          ttl: 3600s
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+  - name: version-a
+    labels:
+      version: v1
+  - name: version-b
+    labels:
+      version: v2

@@ -1,0 +1,74 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: jaeger-production
+  annotations:
+    description: "Production Jaeger deployment with Elasticsearch"
+
+namespace: default
+
+resources:
+  # Jaeger components
+  - collector-deployment.yaml
+  - collector-service.yaml
+  - query-deployment.yaml
+  - query-service.yaml
+  - agent-daemonset.yaml
+  - agent-service.yaml
+
+  # Configuration
+  - ../configmap.yaml
+
+  # Storage backend
+  - ../elasticsearch/configmap.yaml
+  - ../elasticsearch/service.yaml
+  - ../elasticsearch/statefulset.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: observability
+  app.kubernetes.io/component: tracing
+  app.kubernetes.io/managed-by: kustomize
+  environment: production
+
+# Resource configurations
+images:
+  - name: jaegertracing/jaeger-collector
+    newTag: "1.51"
+  - name: jaegertracing/jaeger-query
+    newTag: "1.51"
+  - name: jaegertracing/jaeger-agent
+    newTag: "1.51"
+  - name: docker.elastic.co/elasticsearch/elasticsearch
+    newTag: "8.11.1"
+
+# Replicas for production
+replicas:
+  - name: jaeger-collector
+    count: 3
+  - name: jaeger-query
+    count: 2
+  - name: elasticsearch
+    count: 3
+
+# Configuration overrides
+configMapGenerator:
+  - name: jaeger-production-config
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - METRICS_BACKEND=prometheus
+      - SAMPLING_RATE=0.5
+
+# Add production-specific annotations
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: "app=jaeger"
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/prometheus.io~1scrape
+        value: "true"
+      - op: add
+        path: /spec/template/metadata/annotations/prometheus.io~1port
+        value: "14269"

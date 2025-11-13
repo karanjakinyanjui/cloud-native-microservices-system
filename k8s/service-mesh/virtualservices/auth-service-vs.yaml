@@ -1,0 +1,58 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: auth-service
+  namespace: default
+  labels:
+    app: auth-service
+    version: v1
+spec:
+  hosts:
+  - auth-service
+  - auth-service.default.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/auth"
+    route:
+    - destination:
+        host: auth-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 15s
+    retries:
+      attempts: 3
+      perTryTimeout: 5s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    # Fault injection for testing (disable in production)
+    # fault:
+    #   delay:
+    #     percentage:
+    #       value: 0.1
+    #     fixedDelay: 2s
+    #   abort:
+    #     percentage:
+    #       value: 0.05
+    #     httpStatus: 503
+  # Health check
+  - match:
+    - uri:
+        exact: "/health"
+    - uri:
+        exact: "/healthz"
+    route:
+    - destination:
+        host: auth-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 5s
+  # Default route
+  - route:
+    - destination:
+        host: auth-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 15s

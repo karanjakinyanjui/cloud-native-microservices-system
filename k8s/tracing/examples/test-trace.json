@@ -1,0 +1,125 @@
+{
+  "data": [
+    {
+      "traceID": "1234567890abcdef",
+      "spans": [
+        {
+          "traceID": "1234567890abcdef",
+          "spanID": "1234567890abcdef",
+          "operationName": "HTTP GET /api/users",
+          "references": [],
+          "startTime": 1699900000000000,
+          "duration": 150000,
+          "tags": [
+            {
+              "key": "http.method",
+              "type": "string",
+              "value": "GET"
+            },
+            {
+              "key": "http.url",
+              "type": "string",
+              "value": "http://user-service/api/users"
+            },
+            {
+              "key": "http.status_code",
+              "type": "int64",
+              "value": 200
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "server"
+            },
+            {
+              "key": "component",
+              "type": "string",
+              "value": "user-service"
+            }
+          ],
+          "logs": [
+            {
+              "timestamp": 1699900000050000,
+              "fields": [
+                {
+                  "key": "event",
+                  "type": "string",
+                  "value": "database query"
+                },
+                {
+                  "key": "query",
+                  "type": "string",
+                  "value": "SELECT * FROM users WHERE id = ?"
+                }
+              ]
+            }
+          ],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "1234567890abcdef",
+          "spanID": "fedcba0987654321",
+          "operationName": "SQL SELECT",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "1234567890abcdef",
+              "spanID": "1234567890abcdef"
+            }
+          ],
+          "startTime": 1699900000050000,
+          "duration": 50000,
+          "tags": [
+            {
+              "key": "db.type",
+              "type": "string",
+              "value": "sql"
+            },
+            {
+              "key": "db.instance",
+              "type": "string",
+              "value": "userdb"
+            },
+            {
+              "key": "db.statement",
+              "type": "string",
+              "value": "SELECT * FROM users WHERE id = ?"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "client"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "user-service",
+          "tags": [
+            {
+              "key": "hostname",
+              "type": "string",
+              "value": "user-service-pod-123"
+            },
+            {
+              "key": "ip",
+              "type": "string",
+              "value": "10.0.1.100"
+            },
+            {
+              "key": "jaeger.version",
+              "type": "string",
+              "value": "Go-2.30.0"
+            }
+          ]
+        }
+      },
+      "warnings": null
+    }
+  ]
+}

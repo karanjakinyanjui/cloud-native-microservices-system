@@ -1,0 +1,39 @@
+---
+# PersistentVolumeClaim for database backups
+# Note: The main data PVCs are created automatically by the StatefulSet volumeClaimTemplates
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notification-db-backup-pvc
+  namespace: default
+  labels:
+    app.kubernetes.io/name: notification-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+    app.kubernetes.io/usage: backup
+spec:
+  accessModes:
+    - ReadWriteMany  # Multiple pods can write backups
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 50Gi  # Adjust based on expected backup sizes
+---
+# Optional: PVC for WAL archives (for Point-in-Time Recovery)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notification-db-wal-archive-pvc
+  namespace: default
+  labels:
+    app.kubernetes.io/name: notification-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+    app.kubernetes.io/usage: wal-archive
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 20Gi

@@ -1,0 +1,180 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-resource-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: monitoring
+data:
+  resource-alerts.yaml: |
+    groups:
+      - name: resource_usage
+        interval: 30s
+        rules:
+          # High CPU usage on nodes
+          - alert: NodeHighCPU
+            expr: |
+              100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High CPU usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% CPU usage."
+
+          # Critical CPU usage on nodes
+          - alert: NodeCriticalCPU
+            expr: |
+              100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+            for: 5m
+            labels:
+              severity: critical
+              component: node
+            annotations:
+              summary: "Critical CPU usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% CPU usage."
+
+          # High memory usage on nodes
+          - alert: NodeHighMemory
+            expr: |
+              (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High memory usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% memory usage."
+
+          # Critical memory usage on nodes
+          - alert: NodeCriticalMemory
+            expr: |
+              (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+            for: 5m
+            labels:
+              severity: critical
+              component: node
+            annotations:
+              summary: "Critical memory usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% memory usage."
+
+          # High disk usage
+          - alert: NodeHighDisk
+            expr: |
+              (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"})
+              /
+              node_filesystem_size_bytes{mountpoint="/"} * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High disk usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% disk usage on root filesystem."
+
+          # Critical disk usage
+          - alert: NodeCriticalDisk
+            expr: |
+              (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"})
+              /
+              node_filesystem_size_bytes{mountpoint="/"} * 100 > 90
+            for: 5m
+            labels:
+              severity: critical
+              component: node
+            annotations:
+              summary: "Critical disk usage on node {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} has {{ $value | humanize }}% disk usage on root filesystem."
+
+          # Disk will fill in 4 hours
+          - alert: NodeDiskWillFillSoon
+            expr: |
+              predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[1h], 4 * 3600) < 0
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "Disk on {{ $labels.instance }} will fill in ~4 hours"
+              description: "Based on current usage trends, disk on {{ $labels.instance }} will fill in approximately 4 hours."
+
+          # High pod CPU usage
+          - alert: PodHighCPU
+            expr: |
+              sum(rate(container_cpu_usage_seconds_total{namespace="default",pod=~".*-service-.*|api-gateway-.*"}[5m])) by (pod) * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: pod
+            annotations:
+              summary: "High CPU usage on pod {{ $labels.pod }}"
+              description: "Pod {{ $labels.pod }} is using {{ $value | humanize }}% CPU."
+
+          # High pod memory usage
+          - alert: PodHighMemory
+            expr: |
+              sum(container_memory_usage_bytes{namespace="default",pod=~".*-service-.*|api-gateway-.*"}) by (pod)
+              /
+              sum(container_spec_memory_limit_bytes{namespace="default",pod=~".*-service-.*|api-gateway-.*"}) by (pod) * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: pod
+            annotations:
+              summary: "High memory usage on pod {{ $labels.pod }}"
+              description: "Pod {{ $labels.pod }} is using {{ $value | humanize }}% of its memory limit."
+
+          # Pod near memory limit
+          - alert: PodNearMemoryLimit
+            expr: |
+              sum(container_memory_usage_bytes{namespace="default",pod=~".*-service-.*|api-gateway-.*"}) by (pod)
+              /
+              sum(container_spec_memory_limit_bytes{namespace="default",pod=~".*-service-.*|api-gateway-.*"}) by (pod) * 100 > 95
+            for: 5m
+            labels:
+              severity: critical
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.pod }} near memory limit"
+              description: "Pod {{ $labels.pod }} is using {{ $value | humanize }}% of its memory limit and may be OOMKilled soon."
+
+          # PVC usage high
+          - alert: PersistentVolumeHighUsage
+            expr: |
+              (kubelet_volume_stats_capacity_bytes - kubelet_volume_stats_available_bytes)
+              /
+              kubelet_volume_stats_capacity_bytes * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: storage
+            annotations:
+              summary: "High usage on PVC {{ $labels.persistentvolumeclaim }}"
+              description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanize }}% full."
+
+          # Network errors
+          - alert: NodeHighNetworkErrors
+            expr: |
+              rate(node_network_receive_errs_total[5m]) > 10
+              or
+              rate(node_network_transmit_errs_total[5m]) > 10
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High network errors on {{ $labels.instance }}"
+              description: "Node {{ $labels.instance }} interface {{ $labels.device }} is experiencing {{ $value | humanize }} errors/sec."
+
+          # Node not ready
+          - alert: NodeNotReady
+            expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: node
+            annotations:
+              summary: "Node {{ $labels.node }} is not ready"
+              description: "Node {{ $labels.node }} has been in NotReady state for more than 5 minutes."

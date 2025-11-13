@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  labels:
+    app: frontend
+data:
+  NODE_ENV: "production"
+  API_GATEWAY_URL: "http://api-gateway:3000"
+  REACT_APP_API_URL: "/api"
+  REACT_APP_WS_URL: "ws://api-gateway:3000"
+  REACT_APP_ENVIRONMENT: "production"
+  REACT_APP_GA_TRACKING_ID: ""
+  REACT_APP_ENABLE_SERVICE_WORKER: "true"
+  REACT_APP_MAX_FILE_SIZE: "5242880"
+  REACT_APP_SUPPORTED_FORMATS: "jpg,jpeg,png,gif,webp"

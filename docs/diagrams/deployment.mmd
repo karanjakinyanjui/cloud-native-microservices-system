@@ -1,0 +1,126 @@
+```mermaid
+graph TB
+    subgraph "Kubernetes Cluster"
+        subgraph "Namespace: microservices"
+            subgraph "Ingress"
+                IngressCtrl[Nginx Ingress Controller<br/>LoadBalancer Service]
+            end
+
+            subgraph "Application Pods"
+                Gateway1[API Gateway Pod 1]
+                Gateway2[API Gateway Pod 2]
+                Gateway3[API Gateway Pod 3]
+                Auth1[Auth Service Pod 1]
+                Auth2[Auth Service Pod 2]
+                User1[User Service Pod 1]
+                User2[User Service Pod 2]
+                Product1[Product Service Pod 1]
+                Product2[Product Service Pod 2]
+                Order1[Order Service Pod 1]
+                Order2[Order Service Pod 2]
+                Payment1[Payment Service Pod 1]
+                Payment2[Payment Service Pod 2]
+                Notification1[Notification Service Pod 1]
+                Notification2[Notification Service Pod 2]
+            end
+
+            subgraph "StatefulSets"
+                Postgres1[PostgreSQL Master]
+                Postgres2[PostgreSQL Replica]
+                Redis1[Redis Master]
+                Redis2[Redis Replica]
+            end
+
+            subgraph "Monitoring"
+                Prometheus[Prometheus Server]
+                Grafana[Grafana Dashboard]
+                Jaeger[Jaeger Collector]
+            end
+
+            subgraph "Storage"
+                PV1[Persistent Volume 1<br/>PostgreSQL Data]
+                PV2[Persistent Volume 2<br/>Redis Data]
+                PV3[Persistent Volume 3<br/>Prometheus Data]
+            end
+
+            subgraph "Configuration"
+                ConfigMaps[ConfigMaps<br/>Service Configs]
+                Secrets[Secrets<br/>Credentials, Keys]
+            end
+        end
+
+        subgraph "Kube-System"
+            DNS[CoreDNS]
+            MetricsServer[Metrics Server]
+        end
+    end
+
+    subgraph "External Services"
+        CloudProvider[Cloud Provider<br/>Load Balancer]
+        DNS_External[DNS Provider<br/>Route 53/CloudDNS]
+        CertAuthority[Let's Encrypt<br/>SSL Certificates]
+    end
+
+    CloudProvider -->|Traffic| IngressCtrl
+    DNS_External -.->|Resolves| CloudProvider
+    CertAuthority -.->|Issues Certs| IngressCtrl
+
+    IngressCtrl --> Gateway1
+    IngressCtrl --> Gateway2
+    IngressCtrl --> Gateway3
+
+    Gateway1 --> Auth1
+    Gateway1 --> Auth2
+    Gateway2 --> User1
+    Gateway2 --> User2
+    Gateway3 --> Product1
+    Gateway3 --> Product2
+
+    Auth1 --> Postgres1
+    Auth2 --> Postgres1
+    User1 --> Postgres1
+    User2 --> Postgres1
+    Product1 --> Postgres1
+    Product2 --> Postgres1
+    Order1 --> Postgres1
+    Order2 --> Postgres1
+    Payment1 --> Postgres1
+    Payment2 --> Postgres1
+    Notification1 --> Postgres1
+    Notification2 --> Postgres1
+
+    Postgres1 -.->|Replicates| Postgres2
+
+    Gateway1 --> Redis1
+    Gateway2 --> Redis1
+    Gateway3 --> Redis1
+    Redis1 -.->|Replicates| Redis2
+
+    Postgres1 --> PV1
+    Redis1 --> PV2
+    Prometheus --> PV3
+
+    Auth1 -.->|Reads| ConfigMaps
+    Auth1 -.->|Reads| Secrets
+    User1 -.->|Reads| ConfigMaps
+    Product1 -.->|Reads| ConfigMaps
+
+    Gateway1 -.->|Metrics| Prometheus
+    Auth1 -.->|Metrics| Prometheus
+    User1 -.->|Metrics| Prometheus
+    Product1 -.->|Metrics| Prometheus
+
+    Prometheus --> Grafana
+
+    Gateway1 -.->|Traces| Jaeger
+    Auth1 -.->|Traces| Jaeger
+
+    style IngressCtrl fill:#ff9800
+    style Gateway1 fill:#2196f3
+    style Gateway2 fill:#2196f3
+    style Gateway3 fill:#2196f3
+    style Postgres1 fill:#4caf50
+    style Redis1 fill:#f44336
+    style Prometheus fill:#9c27b0
+    style Grafana fill:#9c27b0
+```

@@ -1,0 +1,95 @@
+---
+# Enable STRICT mTLS for entire namespace
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  mtls:
+    mode: STRICT
+---
+# Service-specific peer authentication for API Gateway
+# Allows both mTLS and plaintext for external traffic
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: api-gateway
+  namespace: default
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  mtls:
+    mode: PERMISSIVE # Allows both mTLS and plaintext
+  portLevelMtls:
+    8080:
+      mode: PERMISSIVE
+---
+# Service-specific peer authentication for Frontend
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: frontend
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+  mtls:
+    mode: PERMISSIVE # Allows both mTLS and plaintext
+  portLevelMtls:
+    3000:
+      mode: PERMISSIVE
+---
+# STRICT mTLS for all backend services
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: backend-services
+  namespace: default
+  labels:
+    app: microservices
+    tier: backend
+spec:
+  selector:
+    matchLabels:
+      tier: backend
+  mtls:
+    mode: STRICT
+---
+# Auth Service - STRICT mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: auth-service
+  namespace: default
+  labels:
+    app: auth-service
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  mtls:
+    mode: STRICT
+---
+# Payment Service - STRICT mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: payment-service
+  namespace: default
+  labels:
+    app: payment-service
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  mtls:
+    mode: STRICT

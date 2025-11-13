@@ -1,0 +1,209 @@
+---
+# External HTTP services
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-http-services
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  hosts:
+  - "*.googleapis.com"
+  - "*.amazon.com"
+  - "*.stripe.com"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External email service (e.g., SendGrid, Mailgun)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-email-service
+  namespace: default
+  labels:
+    app: notification-service
+spec:
+  hosts:
+  - "api.sendgrid.com"
+  - "smtp.sendgrid.net"
+  - "api.mailgun.net"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 587
+    name: smtp-tls
+    protocol: TCP
+  - number: 25
+    name: smtp
+    protocol: TCP
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External payment gateway (e.g., Stripe, PayPal)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-payment-gateway
+  namespace: default
+  labels:
+    app: payment-service
+spec:
+  hosts:
+  - "api.stripe.com"
+  - "api.paypal.com"
+  - "api.braintreegateway.com"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External SMS/messaging service (e.g., Twilio)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-sms-service
+  namespace: default
+  labels:
+    app: notification-service
+spec:
+  hosts:
+  - "api.twilio.com"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External authentication providers (OAuth, OIDC)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-auth-providers
+  namespace: default
+  labels:
+    app: auth-service
+spec:
+  hosts:
+  - "accounts.google.com"
+  - "oauth2.googleapis.com"
+  - "login.microsoftonline.com"
+  - "github.com"
+  - "api.github.com"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External monitoring/logging services (if using external SaaS)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-observability-services
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  hosts:
+  - "*.datadoghq.com"
+  - "*.newrelic.com"
+  - "*.honeycomb.io"
+  - "*.sentry.io"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External storage services (AWS S3, Google Cloud Storage, etc.)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-storage-services
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  hosts:
+  - "*.s3.amazonaws.com"
+  - "s3.*.amazonaws.com"
+  - "*.storage.googleapis.com"
+  - "*.blob.core.windows.net"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# External CDN services
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-cdn-services
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  hosts:
+  - "*.cloudflare.com"
+  - "*.cloudfront.net"
+  - "*.fastly.net"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# Virtual Service for external payment gateway with timeout and retries
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: external-payment-gateway-vs
+  namespace: default
+  labels:
+    app: payment-service
+spec:
+  hosts:
+  - "api.stripe.com"
+  http:
+  - timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,connect-failure,refused-stream
+    route:
+    - destination:
+        host: "api.stripe.com"
+---
+# Destination Rule for external services (TLS)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: external-services-tls
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  host: "*.googleapis.com"
+  trafficPolicy:
+    tls:
+      mode: SIMPLE

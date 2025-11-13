@@ -1,0 +1,71 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ecommerce
+
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # Auth Service
+  - auth-service/deployment.yaml
+  - auth-service/service.yaml
+  - auth-service/configmap.yaml
+  - auth-service/secret.yaml
+  - auth-service/hpa.yaml
+
+  # User Service
+  - user-service/deployment.yaml
+  - user-service/service.yaml
+  - user-service/configmap.yaml
+  - user-service/secret.yaml
+  - user-service/hpa.yaml
+
+  # Product Service
+  - product-service/deployment.yaml
+  - product-service/service.yaml
+  - product-service/configmap.yaml
+  - product-service/secret.yaml
+  - product-service/hpa.yaml
+
+  # Order Service
+  - order-service/deployment.yaml
+  - order-service/service.yaml
+  - order-service/configmap.yaml
+  - order-service/secret.yaml
+  - order-service/hpa.yaml
+
+  # Payment Service
+  - payment-service/deployment.yaml
+  - payment-service/service.yaml
+  - payment-service/configmap.yaml
+  - payment-service/secret.yaml
+  - payment-service/hpa.yaml
+
+  # Notification Service
+  - notification-service/deployment.yaml
+  - notification-service/service.yaml
+  - notification-service/configmap.yaml
+  - notification-service/secret.yaml
+  - notification-service/hpa.yaml
+
+  # API Gateway
+  - api-gateway/deployment.yaml
+  - api-gateway/service.yaml
+  - api-gateway/configmap.yaml
+  - api-gateway/secret.yaml
+  - api-gateway/hpa.yaml
+
+  # Frontend
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/configmap.yaml
+  - frontend/secret.yaml
+  - frontend/hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/part-of: ecommerce-platform
+
+commonAnnotations:
+  description: "Cloud-native microservices e-commerce platform"

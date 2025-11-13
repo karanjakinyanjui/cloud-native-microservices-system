@@ -1,0 +1,110 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: istio-service-mesh
+  namespace: default
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: microservices
+  app.kubernetes.io/managed-by: kustomize
+  istio.io/rev: default
+
+# Common annotations
+commonAnnotations:
+  description: "Istio service mesh configuration for cloud-native microservices"
+  version: "1.0.0"
+
+# Resources to include in the service mesh configuration
+resources:
+  # Gateway configuration
+  - gateway.yaml
+
+  # VirtualServices
+  - virtualservices/api-gateway-vs.yaml
+  - virtualservices/frontend-vs.yaml
+  - virtualservices/auth-service-vs.yaml
+  - virtualservices/user-service-vs.yaml
+  - virtualservices/product-service-vs.yaml
+  - virtualservices/order-service-vs.yaml
+  - virtualservices/payment-service-vs.yaml
+  - virtualservices/notification-service-vs.yaml
+
+  # DestinationRules
+  - destinationrules/api-gateway-dr.yaml
+  - destinationrules/frontend-dr.yaml
+  - destinationrules/auth-service-dr.yaml
+  - destinationrules/user-service-dr.yaml
+  - destinationrules/product-service-dr.yaml
+  - destinationrules/order-service-dr.yaml
+  - destinationrules/payment-service-dr.yaml
+  - destinationrules/notification-service-dr.yaml
+
+  # Security policies
+  - authorization-policy.yaml
+  - peer-authentication.yaml
+
+  # External services
+  - service-entry.yaml
+
+  # Observability
+  - telemetry.yaml
+
+# Optional: Traffic management examples (uncomment to enable)
+# - traffic-management/canary-rollout.yaml
+# - traffic-management/ab-testing.yaml
+# - traffic-management/rate-limiting.yaml
+
+# Namespace to deploy resources to
+namespace: default
+
+# ConfigMap generator for service mesh configuration
+configMapGenerator:
+  - name: istio-mesh-config
+    literals:
+      - MESH_VERSION=1.0.0
+      - ENABLE_TRACING=true
+      - ENABLE_METRICS=true
+      - MTLS_MODE=STRICT
+
+# Image configurations (if needed for sidecars)
+# images:
+#   - name: istio/proxyv2
+#     newTag: 1.20.0
+
+# Replacements for dynamic configuration
+replacements:
+  - source:
+      kind: ConfigMap
+      name: istio-mesh-config
+      fieldPath: data.MESH_VERSION
+    targets:
+      - select:
+          kind: Gateway
+        fieldPaths:
+          - metadata.annotations.[version]
+
+# Patches for environment-specific overrides
+# patchesStrategicMerge:
+#   - |-
+#     apiVersion: networking.istio.io/v1beta1
+#     kind: Gateway
+#     metadata:
+#       name: microservices-gateway
+#     spec:
+#       servers:
+#       - hosts:
+#         - "production.example.com"
+
+# JSON patches for fine-grained modifications
+# patchesJson6902:
+#   - target:
+#       group: networking.istio.io
+#       version: v1beta1
+#       kind: VirtualService
+#       name: api-gateway
+#     patch: |-
+#       - op: replace
+#         path: /spec/http/0/timeout
+#         value: 45s

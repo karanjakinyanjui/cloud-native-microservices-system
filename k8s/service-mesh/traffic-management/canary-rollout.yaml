@@ -1,0 +1,184 @@
+# Canary Deployment Example for Product Service
+# This demonstrates a gradual rollout from v1 to v2
+# Start with 90% v1, 10% v2, then gradually shift traffic
+
+---
+# VirtualService for canary deployment
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: product-service-canary
+  namespace: default
+  labels:
+    app: product-service
+    deployment-strategy: canary
+spec:
+  hosts:
+  - product-service
+  - product-service.default.svc.cluster.local
+  http:
+  # Health checks always go to v1 (stable)
+  - match:
+    - uri:
+        exact: "/health"
+    - uri:
+        exact: "/healthz"
+    route:
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v1
+      weight: 100
+  # Canary traffic routing
+  # Phase 1: 10% to v2 (canary), 90% to v1 (stable)
+  # Adjust weights as you validate the canary
+  - route:
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v1
+      weight: 90
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v2
+      weight: 10
+    timeout: 20s
+    retries:
+      attempts: 3
+      perTryTimeout: 7s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+
+---
+# Alternative: Header-based canary (for specific users/testers)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: product-service-canary-headers
+  namespace: default
+  labels:
+    app: product-service
+    deployment-strategy: canary-headers
+spec:
+  hosts:
+  - product-service
+  http:
+  # Route based on header (e.g., internal testers)
+  - match:
+    - headers:
+        x-canary-user:
+          exact: "true"
+    route:
+    - destination:
+        host: product-service
+        subset: v2
+      weight: 100
+  # Route based on specific user IDs
+  - match:
+    - headers:
+        x-user-id:
+          regex: "^(user-1|user-2|user-3)$"
+    route:
+    - destination:
+        host: product-service
+        subset: v2
+      weight: 100
+  # Default traffic to stable version
+  - route:
+    - destination:
+        host: product-service
+        subset: v1
+      weight: 100
+
+---
+# Progressive canary rollout stages
+# Uncomment the desired phase and apply
+
+# # Phase 1: 10% canary (initial rollout)
+# - route:
+#   - destination:
+#       host: product-service
+#       subset: v1
+#     weight: 90
+#   - destination:
+#       host: product-service
+#       subset: v2
+#     weight: 10
+
+# # Phase 2: 25% canary
+# - route:
+#   - destination:
+#       host: product-service
+#       subset: v1
+#     weight: 75
+#   - destination:
+#       host: product-service
+#       subset: v2
+#     weight: 25
+
+# # Phase 3: 50% canary
+# - route:
+#   - destination:
+#       host: product-service
+#       subset: v1
+#     weight: 50
+#   - destination:
+#       host: product-service
+#       subset: v2
+#     weight: 50
+
+# # Phase 4: 75% canary
+# - route:
+#   - destination:
+#       host: product-service
+#       subset: v1
+#     weight: 25
+#   - destination:
+#       host: product-service
+#       subset: v2
+#     weight: 75
+
+# # Phase 5: 100% canary (full rollout)
+# - route:
+#   - destination:
+#       host: product-service
+#       subset: v2
+#     weight: 100
+
+---
+# DestinationRule defining v1 and v2 subsets
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: product-service-canary-dr
+  namespace: default
+  labels:
+    app: product-service
+spec:
+  host: product-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: v2
+    labels:
+      version: v2

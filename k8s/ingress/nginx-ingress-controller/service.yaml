@@ -1,0 +1,235 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+  annotations:
+    # Cloud provider specific annotations
+    # Uncomment and configure based on your cloud provider
+
+    # AWS ELB annotations
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+    # service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:us-east-1:123456789012:certificate/xxxxx"
+    # service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+    # service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "3600"
+    # service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: "*"
+
+    # GCP Load Balancer annotations
+    # cloud.google.com/load-balancer-type: "External"
+    # cloud.google.com/neg: '{"ingress": true}'
+    # cloud.google.com/backend-config: '{"default": "ingress-backendconfig"}'
+
+    # Azure Load Balancer annotations
+    # service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+    # service.beta.kubernetes.io/azure-pip-name: "ingress-public-ip"
+    # service.beta.kubernetes.io/azure-load-balancer-resource-group: "my-resource-group"
+
+    # DigitalOcean Load Balancer annotations
+    # service.beta.kubernetes.io/do-loadbalancer-enable-proxy-protocol: "true"
+    # service.beta.kubernetes.io/do-loadbalancer-hostname: "example.com"
+
+    # Monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10254"
+
+spec:
+  type: LoadBalancer
+
+  # External traffic policy
+  # Local - preserves source IP but may cause uneven load distribution
+  # Cluster - better load distribution but loses source IP
+  externalTrafficPolicy: Local
+
+  # Session affinity
+  sessionAffinity: None
+
+  # IP families (for dual-stack support)
+  ipFamilyPolicy: SingleStack
+  ipFamilies:
+  - IPv4
+
+  # Load balancer source ranges (restrict access if needed)
+  # loadBalancerSourceRanges:
+  # - 0.0.0.0/0  # Allow all (default)
+  # - 10.0.0.0/8  # Allow only from specific CIDR
+
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+    # nodePort: 30080  # Uncomment if using NodePort type
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+    # nodePort: 30443  # Uncomment if using NodePort type
+
+---
+# Internal Service for metrics and monitoring
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-controller-metrics
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10254"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+  ports:
+  - name: metrics
+    port: 10254
+    targetPort: metrics
+    protocol: TCP
+
+---
+# Admission webhook service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-controller-admission
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+  ports:
+  - name: https-webhook
+    port: 443
+    targetPort: webhook
+    protocol: TCP
+    appProtocol: https
+
+---
+# Headless service for internal communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-controller-headless
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+
+---
+# Custom error pages backend service
+apiVersion: v1
+kind: Service
+metadata:
+  name: custom-error-pages
+  namespace: default
+  labels:
+    app: custom-error-pages
+spec:
+  type: ClusterIP
+  selector:
+    app: custom-error-pages
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+
+---
+# Custom error pages deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-error-pages
+  namespace: default
+  labels:
+    app: custom-error-pages
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: custom-error-pages
+  template:
+    metadata:
+      labels:
+        app: custom-error-pages
+    spec:
+      containers:
+      - name: error-pages
+        image: ghcr.io/tarampampam/error-pages:2.27
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: TEMPLATE_NAME
+          value: "ghost"  # Available: ghost, l7-light, l7-dark, shuffle, noise, hacker-terminal
+        - name: SHOW_DETAILS
+          value: "false"  # Set to "true" to show error details (not recommended for production)
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true

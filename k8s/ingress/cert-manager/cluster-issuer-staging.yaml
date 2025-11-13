@@ -1,0 +1,67 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # Let's Encrypt Staging Server
+    # Use this for testing to avoid hitting rate limits
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+    # Email address for ACME registration
+    # Let's Encrypt will use this to contact you about expiring certificates,
+    # and issues related to your account
+    email: admin@example.com
+
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-staging-private-key
+
+    # Enable the HTTP-01 challenge provider
+    solvers:
+    # HTTP-01 challenge solver
+    - http01:
+        ingress:
+          class: nginx
+          podTemplate:
+            metadata:
+              labels:
+                app: cert-manager-solver
+            spec:
+              nodeSelector:
+                kubernetes.io/os: linux
+
+    # DNS-01 challenge solver (optional, uncomment and configure if needed)
+    # Useful for wildcard certificates or when HTTP-01 is not feasible
+    # - dns01:
+    #     # Example: CloudFlare DNS provider
+    #     cloudflare:
+    #       email: admin@example.com
+    #       apiTokenSecretRef:
+    #         name: cloudflare-api-token
+    #         key: api-token
+    #     # Example: AWS Route53 DNS provider
+    #     # route53:
+    #     #   region: us-east-1
+    #     #   accessKeyID: YOUR_ACCESS_KEY_ID
+    #     #   secretAccessKeySecretRef:
+    #     #     name: route53-credentials
+    #     #     key: secret-access-key
+    #     # Example: Google Cloud DNS provider
+    #     # cloudDNS:
+    #     #   project: my-project
+    #     #   serviceAccountSecretRef:
+    #     #     name: clouddns-service-account
+    #     #     key: key.json
+
+---
+# Secret for storing DNS provider credentials (example for CloudFlare)
+# Uncomment and apply if using DNS-01 challenge
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: cloudflare-api-token
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   api-token: YOUR_CLOUDFLARE_API_TOKEN

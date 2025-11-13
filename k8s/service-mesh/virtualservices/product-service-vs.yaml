@@ -1,0 +1,54 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: product-service
+  namespace: default
+  labels:
+    app: product-service
+    version: v1
+spec:
+  hosts:
+  - product-service
+  - product-service.default.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/products"
+    route:
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 20s
+    retries:
+      attempts: 3
+      perTryTimeout: 7s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    # Fault injection for testing (disable in production)
+    # fault:
+    #   delay:
+    #     percentage:
+    #       value: 0.1
+    #     fixedDelay: 3s
+  # Health check
+  - match:
+    - uri:
+        exact: "/health"
+    - uri:
+        exact: "/healthz"
+    route:
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 5s
+  # Default route
+  - route:
+    - destination:
+        host: product-service
+        port:
+          number: 8080
+        subset: v1
+    timeout: 20s

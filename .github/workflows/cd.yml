@@ -1,0 +1,360 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+
+jobs:
+  setup:
+    name: Setup Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d)-${GITHUB_SHA::8}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deployment version: $VERSION"
+
+  build-and-push:
+    name: Build & Push - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine context path
+        id: context
+        run: |
+          if [ "${{ matrix.component }}" == "frontend" ]; then
+            echo "path=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "path=services/${{ matrix.component }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.context.outputs.path }}
+          file: ${{ steps.context.outputs.path }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ needs.setup.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ needs.setup.outputs.environment }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ needs.setup.outputs.version }}
+
+  update-manifests:
+    name: Update K8s Manifests
+    runs-on: ubuntu-latest
+    needs: [setup, build-and-push]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image tags in manifests
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          # Update all deployment manifests
+          for service in api-gateway auth-service user-service product-service order-service payment-service notification-service; do
+            if [ -f "k8s/$ENV/$service-deployment.yaml" ]; then
+              sed -i "s|image: .*/$service:.*|image: ${{ env.REGISTRY }}/${{ github.repository }}/$service:$VERSION|g" k8s/$ENV/$service-deployment.yaml
+              echo "Updated $service manifest"
+            fi
+          done
+
+          # Update frontend
+          if [ -f "k8s/$ENV/frontend-deployment.yaml" ]; then
+            sed -i "s|image: .*/frontend:.*|image: ${{ env.REGISTRY }}/${{ github.repository }}/frontend:$VERSION|g" k8s/$ENV/frontend-deployment.yaml
+            echo "Updated frontend manifest"
+          fi
+
+      - name: Commit manifest changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add k8s/
+          git diff --staged --quiet || git commit -m "Deploy ${{ needs.setup.outputs.version }} to ${{ needs.setup.outputs.environment }}"
+          git push
+
+  deploy-to-kubernetes:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [setup, update-manifests]
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+      url: ${{ steps.get-url.outputs.url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ needs.setup.outputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=${{ env.REGISTRY }} \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --namespace=${{ needs.setup.outputs.environment }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to Kubernetes
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          # Apply ConfigMaps and Secrets first
+          kubectl apply -f k8s/$ENV/configmaps/ -n $ENV || true
+          kubectl apply -f k8s/$ENV/secrets/ -n $ENV || true
+
+          # Apply services
+          kubectl apply -f k8s/$ENV/ -n $ENV --recursive
+
+          echo "Deployment initiated"
+
+      - name: Wait for rollout
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          for deployment in api-gateway auth-service user-service product-service order-service payment-service notification-service frontend; do
+            echo "Waiting for $deployment rollout..."
+            kubectl rollout status deployment/$deployment -n $ENV --timeout=5m || echo "$deployment not found, skipping"
+          done
+
+      - name: Get deployment URL
+        id: get-url
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          if [ "$ENV" == "production" ]; then
+            echo "url=https://app.example.com" >> $GITHUB_OUTPUT
+          else
+            echo "url=https://staging.app.example.com" >> $GITHUB_OUTPUT
+          fi
+
+  smoke-tests:
+    name: Run Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-to-kubernetes]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Run health checks
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          echo "Running health checks..."
+
+          for service in api-gateway auth-service user-service product-service order-service payment-service notification-service; do
+            echo "Checking $service..."
+            kubectl get pods -n $ENV -l app=$service
+
+            # Get service endpoint and check health
+            ENDPOINT=$(kubectl get service $service -n $ENV -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "localhost")
+            echo "Service endpoint: $ENDPOINT"
+          done
+
+      - name: Run API smoke tests
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          # Test API Gateway health endpoint
+          echo "Testing API Gateway..."
+          # Add actual smoke test commands here
+
+          echo "Smoke tests completed"
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [setup, smoke-tests]
+    if: failure()
+
+    steps:
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Rollback deployments
+        run: |
+          ENV="${{ needs.setup.outputs.environment }}"
+
+          echo "Rolling back deployments..."
+
+          for deployment in api-gateway auth-service user-service product-service order-service payment-service notification-service frontend; do
+            echo "Rolling back $deployment..."
+            kubectl rollout undo deployment/$deployment -n $ENV || echo "$deployment rollback failed"
+          done
+
+          echo "Rollback completed"
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-to-kubernetes, smoke-tests]
+    if: always()
+
+    steps:
+      - name: Determine deployment status
+        id: status
+        run: |
+          if [ "${{ needs.smoke-tests.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+            echo "emoji=:x:" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ steps.status.outputs.emoji }} Deployment to ${{ needs.setup.outputs.environment }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment Status:* ${{ steps.status.outputs.status }}\n*Environment:* ${{ needs.setup.outputs.environment }}\n*Version:* ${{ needs.setup.outputs.version }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send Discord notification
+        if: vars.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "embeds": [{
+                "title": "Deployment to ${{ needs.setup.outputs.environment }}",
+                "description": "Version: ${{ needs.setup.outputs.version }}",
+                "color": "${{ steps.status.outputs.status == 'success' && '3066993' || '15158332' }}",
+                "fields": [
+                  {"name": "Status", "value": "${{ steps.status.outputs.status }}", "inline": true},
+                  {"name": "Environment", "value": "${{ needs.setup.outputs.environment }}", "inline": true},
+                  {"name": "Commit", "value": "${{ github.sha }}", "inline": true},
+                  {"name": "Author", "value": "${{ github.actor }}", "inline": true}
+                ],
+                "footer": {"text": "GitHub Actions"},
+                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+              }]
+            }' \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}

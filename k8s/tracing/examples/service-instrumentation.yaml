@@ -1,0 +1,157 @@
+---
+# Example deployment with Jaeger instrumentation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-service
+  namespace: default
+  labels:
+    app: example-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: example-service
+  template:
+    metadata:
+      labels:
+        app: example-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: service
+        image: example-service:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Jaeger configuration
+        - name: JAEGER_SERVICE_NAME
+          value: "example-service"
+        - name: JAEGER_AGENT_HOST
+          value: "jaeger-agent"
+        - name: JAEGER_AGENT_PORT
+          value: "6831"
+        - name: JAEGER_SAMPLER_TYPE
+          value: "probabilistic"
+        - name: JAEGER_SAMPLER_PARAM
+          value: "0.5"
+        - name: JAEGER_REPORTER_LOG_SPANS
+          value: "true"
+        - name: JAEGER_REPORTER_MAX_QUEUE_SIZE
+          value: "1000"
+        - name: JAEGER_REPORTER_FLUSH_INTERVAL
+          value: "1s"
+        - name: JAEGER_TAGS
+          value: "deployment.environment=production,version=1.0.0,cluster=k8s"
+
+        # For gRPC collector (alternative to agent)
+        # - name: JAEGER_ENDPOINT
+        #   value: "http://jaeger-collector:14268/api/traces"
+
+        # For OpenTelemetry
+        # - name: OTEL_EXPORTER_JAEGER_ENDPOINT
+        #   value: "http://jaeger-collector:14250"
+        # - name: OTEL_SERVICE_NAME
+        #   value: "example-service"
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# Example sidecar injection pattern
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-service-sidecar
+  namespace: default
+  labels:
+    app: example-service-sidecar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: example-service-sidecar
+  template:
+    metadata:
+      labels:
+        app: example-service-sidecar
+    spec:
+      containers:
+      - name: service
+        image: example-service:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JAEGER_AGENT_HOST
+          value: "localhost"  # Sidecar agent
+        - name: JAEGER_AGENT_PORT
+          value: "6831"
+
+      # Jaeger agent sidecar
+      - name: jaeger-agent
+        image: jaegertracing/jaeger-agent:1.51
+        args:
+        - --reporter.grpc.host-port=jaeger-collector:14250
+        ports:
+        - containerPort: 6831
+          protocol: UDP
+          name: jg-compact
+        - containerPort: 6832
+          protocol: UDP
+          name: jg-binary
+        - containerPort: 5778
+          protocol: TCP
+          name: configs
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+---
+# Example init container for trace validation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-service-init
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-service-init
+  template:
+    metadata:
+      labels:
+        app: example-service-init
+    spec:
+      initContainers:
+      - name: wait-for-jaeger
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z jaeger-agent 6831; do
+            echo "Waiting for Jaeger agent..."
+            sleep 2
+          done
+          echo "Jaeger agent is ready!"
+
+      containers:
+      - name: service
+        image: example-service:latest
+        env:
+        - name: JAEGER_AGENT_HOST
+          value: "jaeger-agent"
+        - name: JAEGER_AGENT_PORT
+          value: "6831"

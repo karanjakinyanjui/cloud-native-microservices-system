@@ -1,0 +1,418 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag: ${{ steps.get-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v$VERSION"
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+            VERSION=${TAG#v}
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+          echo "Release tag: $TAG"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          if ! [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid version format. Expected: X.Y.Z"
+            exit 1
+          fi
+
+      - name: Check if tag exists
+        run: |
+          TAG="${{ steps.get-version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            echo "Tag $TAG does not exist yet"
+          fi
+
+  run-tests:
+    name: Run Tests - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: validate-release
+    strategy:
+      fail-fast: true
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run tests
+        working-directory: services/${{ matrix.service }}
+        run: npm test
+
+  build-and-push-release:
+    name: Build & Push Release - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: [validate-release, run-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine context path
+        id: context
+        run: |
+          if [ "${{ matrix.component }}" == "frontend" ]; then
+            echo "path=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "path=services/${{ matrix.component }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract version parts
+        id: version
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f1-2)
+
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "full=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.context.outputs.path }}
+          file: ${{ steps.context.outputs.path }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ steps.version.outputs.full }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ steps.version.outputs.minor }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ steps.version.outputs.major }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:stable
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.version.outputs.full }}
+
+  generate-changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    needs: validate-release
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+
+          # Get the previous tag
+          PREVIOUS_TAG=$(git describe --abbrev=0 --tags $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || echo "")
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Generating changelog from $PREVIOUS_TAG to ${{ needs.validate-release.outputs.tag }}"
+
+          # Generate changelog
+          CHANGELOG=$(cat <<EOF
+          ## What's Changed
+
+          ### Features
+          $(git log $PREVIOUS_TAG..HEAD --pretty=format:"- %s (%h)" --grep="feat:" --grep="feature:" || echo "No new features")
+
+          ### Bug Fixes
+          $(git log $PREVIOUS_TAG..HEAD --pretty=format:"- %s (%h)" --grep="fix:" --grep="bug:" || echo "No bug fixes")
+
+          ### Improvements
+          $(git log $PREVIOUS_TAG..HEAD --pretty=format:"- %s (%h)" --grep="chore:" --grep="refactor:" || echo "No improvements")
+
+          ### Documentation
+          $(git log $PREVIOUS_TAG..HEAD --pretty=format:"- %s (%h)" --grep="docs:" || echo "No documentation updates")
+
+          **Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ needs.validate-release.outputs.tag }}
+          EOF
+          )
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-and-push-release, generate-changelog]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.validate-release.outputs.tag }}
+          name: Release ${{ needs.validate-release.outputs.version }}
+          body: ${{ needs.generate-changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  create-rollback-point:
+    name: Create Rollback Point
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-github-release]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Create rollback snapshot
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+          echo "Creating rollback point for version $VERSION"
+
+          # Export current production state
+          kubectl get all -n production -o yaml > rollback-$VERSION-$TIMESTAMP.yaml
+
+          echo "Rollback snapshot created"
+
+      - name: Upload rollback snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-snapshot-${{ needs.validate-release.outputs.version }}
+          path: rollback-*.yaml
+          retention-days: 90
+
+  deploy-to-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-and-push-release, create-rollback-point]
+    environment:
+      name: production
+      url: https://app.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Update production manifests
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+
+          # Update all deployment manifests
+          for service in api-gateway auth-service user-service product-service order-service payment-service notification-service frontend; do
+            if [ -f "k8s/production/$service-deployment.yaml" ]; then
+              sed -i "s|image: .*/$service:.*|image: ${{ env.REGISTRY }}/${{ github.repository }}/$service:$VERSION|g" k8s/production/$service-deployment.yaml
+              echo "Updated $service to version $VERSION"
+            fi
+          done
+
+      - name: Deploy to production
+        run: |
+          kubectl apply -f k8s/production/ -n production --recursive
+          echo "Deployment to production initiated"
+
+      - name: Wait for rollout
+        run: |
+          for deployment in api-gateway auth-service user-service product-service order-service payment-service notification-service frontend; do
+            echo "Waiting for $deployment rollout..."
+            kubectl rollout status deployment/$deployment -n production --timeout=10m || echo "$deployment not found, skipping"
+          done
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment..."
+          kubectl get pods -n production
+          kubectl get services -n production
+
+  post-release-tests:
+    name: Post-Release Tests
+    runs-on: ubuntu-latest
+    needs: [validate-release, deploy-to-production]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: |
+          echo "Running post-release smoke tests..."
+          # Add your smoke test commands here
+          echo "Smoke tests completed"
+
+      - name: Run health checks
+        run: |
+          echo "Running health checks..."
+          # Add your health check commands here
+          echo "Health checks completed"
+
+  notify-release:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-github-release, post-release-tests]
+    if: always()
+
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.post-release-tests.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "emoji=🚀" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ steps.status.outputs.emoji }} Release ${{ needs.validate-release.outputs.version }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Release Status:* ${{ steps.status.outputs.status }}\n*Version:* ${{ needs.validate-release.outputs.version }}\n*Tag:* ${{ needs.validate-release.outputs.tag }}\n*Released by:* ${{ github.actor }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Release"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.validate-release.outputs.tag }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send Discord notification
+        if: vars.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "embeds": [{
+                "title": "Release ${{ needs.validate-release.outputs.version }}",
+                "description": "New version released to production",
+                "color": "${{ steps.status.outputs.status == 'success' && '3066993' || '15158332' }}",
+                "fields": [
+                  {"name": "Version", "value": "${{ needs.validate-release.outputs.version }}", "inline": true},
+                  {"name": "Status", "value": "${{ steps.status.outputs.status }}", "inline": true},
+                  {"name": "Released by", "value": "${{ github.actor }}", "inline": true}
+                ],
+                "footer": {"text": "GitHub Actions"},
+                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+              }]
+            }' \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}

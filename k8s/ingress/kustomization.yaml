@@ -1,0 +1,177 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Metadata
+metadata:
+  name: ingress-configuration
+  annotations:
+    description: "Ingress and cert-manager configuration for cloud-native microservices"
+
+# Namespace to deploy resources
+namespace: default
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: cloud-native-microservices
+  app.kubernetes.io/managed-by: kustomize
+  environment: production
+
+# Common annotations applied to all resources
+commonAnnotations:
+  contact: "devops@example.com"
+  documentation: "https://docs.example.com/ingress"
+
+# Resources to include
+resources:
+  # Main ingress configuration
+  - ingress.yaml
+
+  # Middleware configurations
+  - middleware.yaml
+
+  # Nginx Ingress Controller
+  - nginx-ingress-controller/rbac.yaml
+  - nginx-ingress-controller/configmap.yaml
+  - nginx-ingress-controller/deployment.yaml
+  - nginx-ingress-controller/service.yaml
+
+  # cert-manager configurations
+  - cert-manager/cluster-issuer-staging.yaml
+  - cert-manager/cluster-issuer-prod.yaml
+  - cert-manager/certificate.yaml
+
+# Configuration generators
+configMapGenerator:
+  # Generate ingress configuration from files
+  - name: ingress-config
+    files:
+      - configs/custom-snippets.conf
+      - configs/proxy-headers.conf
+    options:
+      disableNameSuffixHash: false
+      labels:
+        config-type: ingress
+
+  # Generate environment-specific configuration
+  - name: environment-config
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - ENABLE_DEBUG=false
+    options:
+      disableNameSuffixHash: true
+
+# Secret generators
+secretGenerator:
+  # Generate TLS certificate secret placeholder
+  # Note: In production, use cert-manager to generate real certificates
+  - name: tls-secret-placeholder
+    type: kubernetes.io/tls
+    files:
+      - tls.crt=certs/placeholder.crt
+      - tls.key=certs/placeholder.key
+    options:
+      disableNameSuffixHash: true
+      labels:
+        secret-type: tls
+
+# Images to use (can override default images)
+images:
+  - name: registry.k8s.io/ingress-nginx/controller
+    newTag: v1.9.4
+  - name: registry.k8s.io/ingress-nginx/kube-webhook-certgen
+    newTag: v20230407
+  - name: ghcr.io/tarampampam/error-pages
+    newTag: "2.27"
+
+# Replicas (can be overridden in overlays)
+replicas:
+  - name: nginx-ingress-controller
+    count: 3
+  - name: custom-error-pages
+    count: 2
+
+# Patches to apply
+patches:
+  # Patch to add resource requests/limits
+  - target:
+      kind: Deployment
+      name: nginx-ingress-controller
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 256Mi
+
+  # Patch to customize nginx configuration
+  - target:
+      kind: ConfigMap
+      name: nginx-configuration
+    patch: |-
+      - op: add
+        path: /data/use-gzip
+        value: "true"
+
+# Vars for substitution
+vars:
+  - name: INGRESS_CLASS
+    objref:
+      kind: IngressClass
+      name: nginx
+      apiVersion: networking.k8s.io/v1
+    fieldref:
+      fieldpath: metadata.name
+
+  - name: NAMESPACE
+    objref:
+      kind: Namespace
+      name: ingress-nginx
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+
+# Replacements for dynamic values
+replacements:
+  # Replace namespace references
+  - source:
+      kind: Namespace
+      name: ingress-nginx
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: Deployment
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Service
+        fieldPaths:
+          - metadata.namespace
+
+# Components (optional extensions)
+# components:
+#   - components/monitoring
+#   - components/security
+
+# Build metadata
+buildMetadata:
+  - managedByLabel
+  - originAnnotations
+  - transformerAnnotations
+
+# Label transformers
+labels:
+  - pairs:
+      tier: ingress
+      component: networking
+    includeSelectors: true
+    includeTemplates: true
+
+# Namespace transformer
+# transformers:
+#   - namespace-transformer.yaml
+
+# Generators
+# generators:
+#   - certificate-generator.yaml

@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  labels:
+    app: api-gateway
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  REDIS_HOST: "redis-gateway"
+  REDIS_PORT: "6379"
+  AUTH_SERVICE_URL: "http://auth-service:3000"
+  USER_SERVICE_URL: "http://user-service:3000"
+  PRODUCT_SERVICE_URL: "http://product-service:3000"
+  ORDER_SERVICE_URL: "http://order-service:3000"
+  PAYMENT_SERVICE_URL: "http://payment-service:3000"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3000"
+  CORS_ORIGIN: "*"
+  RATE_LIMIT_WINDOW: "15"
+  RATE_LIMIT_MAX_REQUESTS: "100"
+  REQUEST_TIMEOUT: "30000"
+  ENABLE_CIRCUIT_BREAKER: "true"
+  CIRCUIT_BREAKER_THRESHOLD: "5"
+  CIRCUIT_BREAKER_TIMEOUT: "60000"
+  ENABLE_COMPRESSION: "true"
+  ENABLE_HELMET: "true"
+  MAX_REQUEST_SIZE: "10mb"

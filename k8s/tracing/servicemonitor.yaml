@@ -1,0 +1,239 @@
+---
+# ServiceMonitor for Jaeger Collector
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jaeger-collector
+  namespace: default
+  labels:
+    app: jaeger
+    component: collector
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: jaeger
+      component: collector
+  endpoints:
+  - port: admin
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_label_component]
+      targetLabel: component
+---
+# ServiceMonitor for Jaeger Query
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jaeger-query
+  namespace: default
+  labels:
+    app: jaeger
+    component: query
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: jaeger
+      component: query
+  endpoints:
+  - port: admin
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+---
+# ServiceMonitor for Jaeger Agent
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jaeger-agent
+  namespace: default
+  labels:
+    app: jaeger
+    component: agent
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: jaeger
+      component: agent
+  endpoints:
+  - port: admin
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+---
+# ServiceMonitor for Elasticsearch
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: elasticsearch-tracing
+  namespace: default
+  labels:
+    app: elasticsearch
+    component: tracing-storage
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: elasticsearch
+      component: tracing-storage
+  endpoints:
+  - port: http
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /_prometheus/metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+---
+# PrometheusRule for Jaeger alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jaeger-alerts
+  namespace: default
+  labels:
+    app: jaeger
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: jaeger.rules
+    interval: 30s
+    rules:
+    # Collector alerts
+    - alert: JaegerCollectorDown
+      expr: up{job="jaeger-collector"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: jaeger
+      annotations:
+        summary: "Jaeger collector is down"
+        description: "Jaeger collector {{ $labels.pod }} has been down for more than 5 minutes."
+
+    - alert: JaegerCollectorHighSpanDropRate
+      expr: rate(jaeger_collector_spans_dropped_total[5m]) > 100
+      for: 5m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "High span drop rate in Jaeger collector"
+        description: "Jaeger collector {{ $labels.pod }} is dropping {{ $value }} spans/sec."
+
+    - alert: JaegerCollectorQueueFull
+      expr: jaeger_collector_queue_length / jaeger_collector_queue_capacity > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "Jaeger collector queue is almost full"
+        description: "Jaeger collector {{ $labels.pod }} queue is {{ $value | humanizePercentage }} full."
+
+    - alert: JaegerCollectorHighMemory
+      expr: container_memory_usage_bytes{pod=~"jaeger-collector.*"} / container_spec_memory_limit_bytes{pod=~"jaeger-collector.*"} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "Jaeger collector high memory usage"
+        description: "Jaeger collector {{ $labels.pod }} is using {{ $value | humanizePercentage }} of memory limit."
+
+    # Query alerts
+    - alert: JaegerQueryDown
+      expr: up{job="jaeger-query"} == 0
+      for: 5m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "Jaeger query is down"
+        description: "Jaeger query {{ $labels.pod }} has been down for more than 5 minutes."
+
+    - alert: JaegerQueryHighLatency
+      expr: histogram_quantile(0.99, rate(jaeger_query_request_duration_seconds_bucket[5m])) > 5
+      for: 5m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "Jaeger query high latency"
+        description: "Jaeger query P99 latency is {{ $value }}s."
+
+    # Agent alerts
+    - alert: JaegerAgentHighMemory
+      expr: container_memory_usage_bytes{pod=~"jaeger-agent.*"} / container_spec_memory_limit_bytes{pod=~"jaeger-agent.*"} > 0.9
+      for: 10m
+      labels:
+        severity: warning
+        component: jaeger
+      annotations:
+        summary: "Jaeger agent high memory usage"
+        description: "Jaeger agent {{ $labels.pod }} on node {{ $labels.node }} is using {{ $value | humanizePercentage }} of memory limit."
+
+    # Elasticsearch alerts
+    - alert: ElasticsearchJaegerClusterDown
+      expr: up{job="elasticsearch-tracing"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: elasticsearch
+      annotations:
+        summary: "Elasticsearch cluster for Jaeger is down"
+        description: "Elasticsearch node {{ $labels.pod }} has been down for more than 5 minutes."
+
+    - alert: ElasticsearchJaegerDiskSpaceHigh
+      expr: elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes < 0.1
+      for: 5m
+      labels:
+        severity: warning
+        component: elasticsearch
+      annotations:
+        summary: "Elasticsearch low disk space"
+        description: "Elasticsearch node {{ $labels.pod }} has less than 10% disk space available."
+
+    - alert: ElasticsearchJaegerHighJVMMemory
+      expr: elasticsearch_jvm_memory_used_bytes / elasticsearch_jvm_memory_max_bytes > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: elasticsearch
+      annotations:
+        summary: "Elasticsearch high JVM memory usage"
+        description: "Elasticsearch node {{ $labels.pod }} is using {{ $value | humanizePercentage }} of JVM heap."
+
+    # Tracing coverage alerts
+    - alert: LowTracingCoverage
+      expr: rate(jaeger_collector_traces_received_total[1h]) < 100
+      for: 30m
+      labels:
+        severity: info
+        component: jaeger
+      annotations:
+        summary: "Low tracing coverage detected"
+        description: "Receiving less than 100 traces/sec - check if services are properly instrumented."

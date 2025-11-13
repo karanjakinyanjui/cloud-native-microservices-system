@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-service-config
+  labels:
+    app: payment-service
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  DB_HOST: "postgres-payment"
+  DB_PORT: "5432"
+  DB_NAME: "payment_db"
+  REDIS_HOST: "redis-payment"
+  REDIS_PORT: "6379"
+  KAFKA_BROKERS: "kafka:9092"
+  ORDER_SERVICE_URL: "http://order-service:3000"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3000"
+  CORS_ORIGIN: "*"
+  RATE_LIMIT_WINDOW: "15"
+  RATE_LIMIT_MAX_REQUESTS: "100"
+  PAYMENT_TIMEOUT_SECONDS: "300"
+  ENABLE_IDEMPOTENCY: "true"
+  RETRY_MAX_ATTEMPTS: "3"
+  STRIPE_API_VERSION: "2023-10-16"

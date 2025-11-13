@@ -1,0 +1,389 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-configuration
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+data:
+  # ============================================================================
+  # General Configuration
+  # ============================================================================
+
+  # Enable HTTP/2
+  use-http2: "true"
+
+  # Enable gRPC
+  use-gzip: "true"
+
+  # Enable brotli compression
+  enable-brotli: "true"
+
+  # Gzip compression level (1-9)
+  gzip-level: "5"
+
+  # Gzip types
+  gzip-types: "application/atom+xml application/javascript application/x-javascript application/json application/rss+xml application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/svg+xml image/x-icon text/css text/javascript text/plain text/x-component"
+
+  # ============================================================================
+  # Performance Configuration
+  # ============================================================================
+
+  # Worker processes (auto = number of CPU cores)
+  worker-processes: "auto"
+
+  # Maximum number of simultaneous connections per worker process
+  max-worker-connections: "16384"
+
+  # Maximum number of open files per worker process
+  max-worker-open-files: "65536"
+
+  # Keepalive timeout
+  keep-alive: "75"
+
+  # Keepalive requests per connection
+  keep-alive-requests: "1000"
+
+  # Upstream keepalive connections
+  upstream-keepalive-connections: "100"
+
+  # Upstream keepalive timeout
+  upstream-keepalive-timeout: "60"
+
+  # Upstream keepalive requests
+  upstream-keepalive-requests: "1000"
+
+  # ============================================================================
+  # Buffer Configuration
+  # ============================================================================
+
+  # Client body buffer size
+  client-body-buffer-size: "1m"
+
+  # Client header buffer size
+  client-header-buffer-size: "1k"
+
+  # Large client header buffers
+  large-client-header-buffers: "4 8k"
+
+  # Client max body size
+  proxy-body-size: "50m"
+
+  # Proxy buffer size
+  proxy-buffer-size: "8k"
+
+  # Proxy buffers
+  proxy-buffers-number: "4"
+
+  # Proxy busy buffers size
+  proxy-busy-buffers-size: "16k"
+
+  # ============================================================================
+  # Timeout Configuration
+  # ============================================================================
+
+  # Client header timeout
+  client-header-timeout: "60"
+
+  # Client body timeout
+  client-body-timeout: "60"
+
+  # Proxy connect timeout
+  proxy-connect-timeout: "60"
+
+  # Proxy send timeout
+  proxy-send-timeout: "60"
+
+  # Proxy read timeout
+  proxy-read-timeout: "60"
+
+  # Proxy next upstream timeout
+  proxy-next-upstream-timeout: "0"
+
+  # Proxy next upstream tries
+  proxy-next-upstream-tries: "3"
+
+  # ============================================================================
+  # SSL/TLS Configuration
+  # ============================================================================
+
+  # SSL protocols
+  ssl-protocols: "TLSv1.2 TLSv1.3"
+
+  # SSL ciphers
+  ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
+
+  # SSL prefer server ciphers
+  ssl-prefer-server-ciphers: "true"
+
+  # SSL session cache
+  ssl-session-cache: "true"
+
+  # SSL session cache size
+  ssl-session-cache-size: "10m"
+
+  # SSL session timeout
+  ssl-session-timeout: "10m"
+
+  # SSL session tickets
+  ssl-session-tickets: "true"
+
+  # SSL buffer size
+  ssl-buffer-size: "4k"
+
+  # Enable OCSP stapling
+  enable-ocsp: "true"
+
+  # HSTS configuration
+  hsts: "true"
+  hsts-max-age: "31536000"
+  hsts-include-subdomains: "true"
+  hsts-preload: "true"
+
+  # ============================================================================
+  # Security Headers
+  # ============================================================================
+
+  # Hide Nginx version
+  hide-headers: "Server,X-Powered-By"
+
+  # Add custom headers
+  add-headers: "ingress-nginx/custom-headers"
+
+  # Enable ModSecurity WAF (if available)
+  # enable-modsecurity: "true"
+  # enable-owasp-modsecurity-crs: "true"
+
+  # ============================================================================
+  # Rate Limiting
+  # ============================================================================
+
+  # Limit rate (bytes/sec per connection)
+  limit-rate: "0"
+
+  # Limit rate after (bytes)
+  limit-rate-after: "0"
+
+  # Limit req zone
+  limit-req-status-code: "429"
+
+  # Limit conn zone
+  limit-conn-status-code: "429"
+
+  # ============================================================================
+  # Load Balancing
+  # ============================================================================
+
+  # Load balancing algorithm
+  # Options: round_robin, least_conn, ip_hash, random
+  load-balance: "round_robin"
+
+  # Upstream hash by
+  # upstream-hash-by: "$request_uri"
+
+  # ============================================================================
+  # Logging Configuration
+  # ============================================================================
+
+  # Access log format
+  log-format-escape-json: "true"
+
+  # Access log format
+  log-format-upstream: '{"time": "$time_iso8601", "remote_addr": "$remote_addr", "x_forwarded_for": "$proxy_add_x_forwarded_for", "request_id": "$req_id", "remote_user": "$remote_user", "bytes_sent": $bytes_sent, "request_time": $request_time, "status": $status, "vhost": "$host", "request_proto": "$server_protocol", "path": "$uri", "request_query": "$args", "request_length": $request_length, "duration": $request_time, "method": "$request_method", "http_referrer": "$http_referer", "http_user_agent": "$http_user_agent", "upstream_addr": "$upstream_addr", "upstream_status": "$upstream_status", "upstream_response_time": "$upstream_response_time", "upstream_response_length": "$upstream_response_length"}'
+
+  # Enable access log
+  disable-access-log: "false"
+
+  # Access log path
+  access-log-path: "/var/log/nginx/access.log"
+
+  # Error log path
+  error-log-path: "/var/log/nginx/error.log"
+
+  # Error log level
+  error-log-level: "notice"
+
+  # ============================================================================
+  # Monitoring & Metrics
+  # ============================================================================
+
+  # Enable Prometheus metrics
+  enable-opentelemetry: "false"
+
+  # ============================================================================
+  # WebSocket Configuration
+  # ============================================================================
+
+  # Proxy set headers for WebSocket
+  proxy-set-headers: "ingress-nginx/custom-headers"
+
+  # ============================================================================
+  # CORS Configuration (Global)
+  # ============================================================================
+
+  # Enable CORS globally (can be overridden per ingress)
+  # enable-cors: "false"
+
+  # ============================================================================
+  # Custom Error Pages
+  # ============================================================================
+
+  # Custom HTTP errors
+  custom-http-errors: "404,500,502,503,504"
+
+  # ============================================================================
+  # Real IP Configuration
+  # ============================================================================
+
+  # Use proxy protocol
+  use-proxy-protocol: "false"
+
+  # Use forwarded headers
+  use-forwarded-headers: "true"
+
+  # Compute full forwarded for
+  compute-full-forwarded-for: "true"
+
+  # Forwarded for header
+  forwarded-for-header: "X-Forwarded-For"
+
+  # Proxy real IP CIDR (trust these IPs for X-Forwarded-For header)
+  # Adjust based on your load balancer/proxy IP ranges
+  proxy-real-ip-cidr: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10"
+
+  # ============================================================================
+  # Server Name Hash
+  # ============================================================================
+
+  # Server names hash bucket size
+  server-name-hash-bucket-size: "128"
+
+  # Server names hash max size
+  server-name-hash-max-size: "1024"
+
+  # Variables hash bucket size
+  variables-hash-bucket-size: "256"
+
+  # Variables hash max size
+  variables-hash-max-size: "2048"
+
+  # Map hash bucket size
+  map-hash-bucket-size: "128"
+
+  # ============================================================================
+  # DNS Configuration
+  # ============================================================================
+
+  # DNS resolver
+  # resolver: "kube-dns.kube-system.svc.cluster.local valid=10s"
+
+  # ============================================================================
+  # Additional Configuration
+  # ============================================================================
+
+  # Enable snippets (caution: security risk if untrusted users can create ingresses)
+  allow-snippet-annotations: "false"
+
+  # Enable service upstream
+  enable-service-upstream: "false"
+
+  # Annotation value word blocklist
+  # annotation-value-word-blocklist: "load_module,lua_package,_by_lua,location,root,proxy_pass,serviceaccount,{,},',\""
+
+  # Block CIDRs (deny access from these IP ranges)
+  # block-cidrs: "1.2.3.4/32,5.6.7.8/32"
+
+  # Block user agents (deny access from these user agents)
+  # block-user-agents: "BadBot,EvilCrawler"
+
+  # Block referers (deny access from these referers)
+  # block-referers: "example.com,test.com"
+
+  # Main snippet (advanced configuration)
+  # main-snippet: |
+  #   load_module /etc/nginx/modules/ngx_http_geoip_module.so;
+
+  # HTTP snippet (advanced configuration)
+  # http-snippet: |
+  #   map $http_upgrade $connection_upgrade {
+  #     default upgrade;
+  #     '' close;
+  #   }
+
+  # Server snippet (advanced configuration)
+  # server-snippet: |
+  #   location /custom {
+  #     return 200 "Custom response";
+  #   }
+
+  # Location snippet (advanced configuration - applied to all locations)
+  # location-snippet: |
+  #   proxy_set_header X-Custom-Header "value";
+
+---
+# ConfigMap for custom headers
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-headers
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+data:
+  # Security headers
+  X-Frame-Options: "DENY"
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+
+  # Custom application headers
+  X-Application-Name: "Cloud Native Microservices"
+  X-Application-Version: "1.0.0"
+
+  # Remove unwanted headers
+  # -Server: ""
+  # -X-Powered-By: ""
+
+---
+# ConfigMap for TCP services (optional)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tcp-services
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+data:
+  # Example: Expose PostgreSQL on port 5432
+  # "5432": "default/postgresql:5432"
+
+  # Example: Expose Redis on port 6379
+  # "6379": "default/redis:6379"
+
+  # Example: Expose MongoDB on port 27017
+  # "27017": "default/mongodb:27017"
+
+---
+# ConfigMap for UDP services (optional)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: udp-services
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: ingress-nginx
+data:
+  # Example: Expose DNS on port 53
+  # "53": "kube-system/kube-dns:53"
+
+  # Example: Expose custom UDP service
+  # "8080": "default/my-udp-service:8080"

@@ -1,0 +1,210 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-db-config
+  namespace: default
+  labels:
+    app.kubernetes.io/name: user-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: microservices-system
+data:
+  # PostgreSQL Configuration
+  postgresql.conf: |
+    # Connection Settings
+    listen_addresses = '*'
+    port = 5432
+    max_connections = 200
+    superuser_reserved_connections = 3
+
+    # Memory Settings
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 64MB
+    work_mem = 4MB
+
+    # WAL (Write-Ahead Logging) Settings
+    wal_level = replica
+    wal_log_hints = on
+    max_wal_size = 1GB
+    min_wal_size = 80MB
+    wal_compression = on
+    wal_buffers = 16MB
+
+    # Replication Settings
+    max_wal_senders = 10
+    max_replication_slots = 10
+    hot_standby = on
+    hot_standby_feedback = on
+
+    # Checkpoint Settings
+    checkpoint_timeout = 15min
+    checkpoint_completion_target = 0.9
+
+    # Query Planning
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+
+    # Logging
+    logging_collector = on
+    log_directory = 'pg_log'
+    log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+    log_rotation_age = 1d
+    log_rotation_size = 100MB
+    log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+    log_timezone = 'UTC'
+    log_statement = 'ddl'
+    log_min_duration_statement = 1000
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+
+    # Performance
+    shared_preload_libraries = 'pg_stat_statements'
+    track_activity_query_size = 2048
+    track_io_timing = on
+
+    # Locale
+    datestyle = 'iso, mdy'
+    timezone = 'UTC'
+    lc_messages = 'en_US.utf8'
+    lc_monetary = 'en_US.utf8'
+    lc_numeric = 'en_US.utf8'
+    lc_time = 'en_US.utf8'
+    default_text_search_config = 'pg_catalog.english'
+
+  pg_hba.conf: |
+    # PostgreSQL Client Authentication Configuration
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+    # "local" is for Unix domain socket connections only
+    local   all             all                                     trust
+
+    # IPv4 local connections:
+    host    all             all             127.0.0.1/32            trust
+
+    # IPv6 local connections:
+    host    all             all             ::1/128                 trust
+
+    # Allow replication connections from replicas
+    host    replication     replicator      0.0.0.0/0               md5
+    host    replication     replicator      ::0/0                   md5
+
+    # Allow all other connections with password
+    host    all             all             0.0.0.0/0               md5
+    host    all             all             ::0/0                   md5
+
+  # Database initialization script
+  init-db.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "Starting database initialization..."
+
+    # Wait for PostgreSQL to be ready
+    until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+      echo "Waiting for PostgreSQL to be ready..."
+      sleep 2
+    done
+
+    echo "PostgreSQL is ready!"
+
+    # Create extensions
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+      -- Create commonly used extensions
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+      CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+
+      -- Create replication user if it doesn't exist
+      DO \$\$
+      BEGIN
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${POSTGRES_REPLICATION_USER}') THEN
+          CREATE USER ${POSTGRES_REPLICATION_USER} WITH REPLICATION ENCRYPTED PASSWORD '${POSTGRES_REPLICATION_PASSWORD}';
+        END IF;
+      END
+      \$\$;
+
+      -- Grant necessary permissions
+      GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_USER};
+    EOSQL
+
+    echo "Database initialization completed successfully!"
+
+  # Backup script
+  backup.sh: |
+    #!/bin/bash
+    set -e
+
+    BACKUP_DIR="/backups"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_FILE="${BACKUP_DIR}/user-db-backup-${TIMESTAMP}.sql.gz"
+
+    echo "Starting backup at $(date)"
+    echo "Backup file: ${BACKUP_FILE}"
+
+    # Create backup directory if it doesn't exist
+    mkdir -p "${BACKUP_DIR}"
+
+    # Perform backup with pg_dump
+    pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -F c -b -v -f "${BACKUP_FILE%.gz}"
+    gzip "${BACKUP_FILE%.gz}"
+
+    # Verify backup was created
+    if [ -f "${BACKUP_FILE}" ]; then
+      BACKUP_SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
+      echo "Backup completed successfully! Size: ${BACKUP_SIZE}"
+
+      # Cleanup old backups (keep last 7 days)
+      find "${BACKUP_DIR}" -name "user-db-backup-*.sql.gz" -mtime +7 -delete
+      echo "Old backups cleaned up (kept last 7 days)"
+
+      exit 0
+    else
+      echo "ERROR: Backup file was not created!"
+      exit 1
+    fi
+
+  # Restore script (for reference)
+  restore.sh: |
+    #!/bin/bash
+    # RESTORE PROCEDURE:
+    # 1. Stop all applications connecting to the database
+    # 2. Scale down the StatefulSet: kubectl scale statefulset user-db-postgresql --replicas=0
+    # 3. Create a restore pod with the backup volume mounted
+    # 4. Run this script with the backup file path:
+    #    ./restore.sh /backups/user-db-backup-YYYYMMDD_HHMMSS.sql.gz
+    # 5. Verify the restore
+    # 6. Scale up the StatefulSet: kubectl scale statefulset user-db-postgresql --replicas=3
+
+    set -e
+
+    if [ -z "$1" ]; then
+      echo "Usage: $0 <backup-file.sql.gz>"
+      exit 1
+    fi
+
+    BACKUP_FILE="$1"
+
+    if [ ! -f "${BACKUP_FILE}" ]; then
+      echo "ERROR: Backup file not found: ${BACKUP_FILE}"
+      exit 1
+    fi
+
+    echo "Starting restore from: ${BACKUP_FILE}"
+    echo "WARNING: This will drop and recreate the database!"
+    echo "Press Ctrl+C within 10 seconds to cancel..."
+    sleep 10
+
+    # Drop and recreate database
+    psql -U postgres <<-EOSQL
+      SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${POSTGRES_DB}';
+      DROP DATABASE IF EXISTS ${POSTGRES_DB};
+      CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};
+    EOSQL
+
+    # Restore from backup
+    gunzip -c "${BACKUP_FILE}" | pg_restore -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v
+
+    echo "Restore completed successfully!"

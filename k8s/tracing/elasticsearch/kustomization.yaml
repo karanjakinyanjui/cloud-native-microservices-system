@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: elasticsearch-tracing
+  annotations:
+    description: "Elasticsearch cluster for Jaeger trace storage"
+
+namespace: default
+
+resources:
+  - configmap.yaml
+  - service.yaml
+  - statefulset.yaml
+
+commonLabels:
+  app: elasticsearch
+  component: tracing-storage
+  app.kubernetes.io/part-of: observability
+
+# Elasticsearch version
+images:
+  - name: docker.elastic.co/elasticsearch/elasticsearch
+    newTag: "8.11.1"
+
+# Storage configuration
+replicas:
+  - name: elasticsearch
+    count: 3
+
+# Configuration overrides for different environments
+configMapGenerator:
+  - name: elasticsearch-env
+    literals:
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - CLUSTER_NAME=jaeger-elasticsearch
+      - DISCOVERY_TYPE=zen

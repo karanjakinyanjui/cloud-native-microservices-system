@@ -1,0 +1,232 @@
+---
+# Enable access logging for all workloads
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: mesh-telemetry
+  namespace: istio-system
+  labels:
+    app: microservices
+spec:
+  # Access logging
+  accessLogging:
+  - providers:
+    - name: envoy
+  # Tracing
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 100.0
+    customTags:
+      environment:
+        literal:
+          value: "production"
+      cluster:
+        literal:
+          value: "kubernetes"
+  # Metrics
+  metrics:
+  - providers:
+    - name: prometheus
+    overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        request_protocol:
+          value: "istio_request_protocol"
+        response_code:
+          value: "istio_response_code"
+---
+# Namespace-level telemetry for default namespace
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: namespace-telemetry
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  # Access logging with JSON format
+  accessLogging:
+  - providers:
+    - name: envoy
+    disabled: false
+  # Tracing configuration
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 100.0
+    customTags:
+      namespace:
+        literal:
+          value: "default"
+      service_version:
+        environment:
+          name: "VERSION"
+          defaultValue: "v1"
+  # Custom metrics
+  metrics:
+  - providers:
+    - name: prometheus
+    dimensions:
+      request_host:
+        value: request.host | "unknown"
+      request_method:
+        value: request.method | "unknown"
+      request_path:
+        value: request.path | "unknown"
+      response_code:
+        value: response.code | 0
+      service_name:
+        value: destination.service.name | "unknown"
+      service_namespace:
+        value: destination.service.namespace | "unknown"
+---
+# Service-specific telemetry for API Gateway
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: api-gateway-telemetry
+  namespace: default
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 100.0
+    customTags:
+      api_version:
+        literal:
+          value: "v1"
+      gateway:
+        literal:
+          value: "api-gateway"
+  metrics:
+  - providers:
+    - name: prometheus
+    dimensions:
+      api_endpoint:
+        value: request.path | "unknown"
+      http_method:
+        value: request.method | "unknown"
+---
+# Service-specific telemetry for Payment Service (higher sampling)
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: payment-service-telemetry
+  namespace: default
+  labels:
+    app: payment-service
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 100.0
+    customTags:
+      payment_provider:
+        literal:
+          value: "stripe"
+      transaction_type:
+        request:
+          header: "x-transaction-type"
+  metrics:
+  - providers:
+    - name: prometheus
+    dimensions:
+      payment_status:
+        request:
+          header: "x-payment-status"
+---
+# Disable telemetry for health checks
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: health-check-telemetry
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  accessLogging:
+  - providers:
+    - name: envoy
+    disabled: true
+    match:
+      mode: SERVER
+    filter:
+      expression: request.url_path.matches('/health|/healthz|/ready|/readyz')
+  metrics:
+  - providers:
+    - name: prometheus
+    overrides:
+    - match:
+        mode: SERVER
+        metric: REQUEST_COUNT
+      disabled: true
+      tagOverrides:
+        request_path:
+          operation: REMOVE
+    filter:
+      expression: request.url_path.matches('/health|/healthz|/ready|/readyz')
+---
+# Custom metrics for business KPIs
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: business-metrics
+  namespace: default
+  labels:
+    app: microservices
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+    dimensions:
+      user_id:
+        request:
+          header: "x-user-id"
+      tenant_id:
+        request:
+          header: "x-tenant-id"
+      request_id:
+        request:
+          header: "x-request-id"
+      correlation_id:
+        request:
+          header: "x-correlation-id"
+---
+# Frontend telemetry
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: frontend-telemetry
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 50.0
+    customTags:
+      user_agent:
+        request:
+          header: "user-agent"
+      client_ip:
+        literal:
+          value: "x-forwarded-for"
+  accessLogging:
+  - providers:
+    - name: envoy
+    filter:
+      expression: response.code >= 400

@@ -1,0 +1,151 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-cert
+  namespace: default
+spec:
+  # Secret name where the certificate will be stored
+  secretName: example-com-tls
+
+  # Duration before the certificate expires
+  # Default: 2160h (90 days)
+  duration: 2160h # 90 days
+
+  # How long before expiry the certificate should be renewed
+  # Default: 360h (15 days)
+  renewBefore: 360h # 15 days
+
+  # Subject Alternative Names for the certificate
+  # These are the domains that will be covered by this certificate
+  dnsNames:
+  - example.com
+  - www.example.com
+  - api.example.com
+  - ws.example.com
+  - monitoring.example.com
+
+  # Common Name (optional, defaults to first dnsNames entry)
+  commonName: example.com
+
+  # Subject configuration (optional)
+  subject:
+    organizations:
+    - "Example Organization"
+    countries:
+    - "US"
+    organizationalUnits:
+    - "Engineering"
+    localities:
+    - "San Francisco"
+    provinces:
+    - "California"
+
+  # Private key configuration
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+    rotationPolicy: Always
+
+  # Issuer reference - use ClusterIssuer for production
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+  # Usages for the certificate
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-example-com-cert
+  namespace: default
+spec:
+  # Secret name where the wildcard certificate will be stored
+  secretName: wildcard-example-com-tls
+
+  # Duration before the certificate expires
+  duration: 2160h # 90 days
+
+  # How long before expiry the certificate should be renewed
+  renewBefore: 360h # 15 days
+
+  # Wildcard certificate for all subdomains
+  # NOTE: Requires DNS-01 challenge solver
+  dnsNames:
+  - "*.example.com"
+  - example.com
+
+  # Common Name
+  commonName: "*.example.com"
+
+  # Subject configuration
+  subject:
+    organizations:
+    - "Example Organization"
+
+  # Private key configuration
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+    rotationPolicy: Always
+
+  # Issuer reference - must use DNS-01 challenge for wildcard
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+  # Usages for the certificate
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+
+---
+# Certificate for staging/testing environment
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-staging-cert
+  namespace: default
+spec:
+  # Secret name where the staging certificate will be stored
+  secretName: example-com-staging-tls
+
+  # Duration before the certificate expires
+  duration: 2160h # 90 days
+
+  # How long before expiry the certificate should be renewed
+  renewBefore: 360h # 15 days
+
+  # DNS names for staging environment
+  dnsNames:
+  - staging.example.com
+  - api.staging.example.com
+
+  # Common Name
+  commonName: staging.example.com
+
+  # Private key configuration
+  privateKey:
+    algorithm: RSA
+    size: 2048
+
+  # Use staging issuer for testing
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+  # Usages for the certificate
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth

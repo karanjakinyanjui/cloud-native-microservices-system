@@ -1,0 +1,108 @@
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as API Gateway
+    participant Auth as Auth Service
+    participant User as User Service
+    participant Product as Product Service
+    participant Order as Order Service
+    participant Payment as Payment Service
+    participant Notification as Notification Service
+    participant Queue as Message Queue
+    participant Cache as Redis Cache
+
+    Note over Client,Notification: User Registration Flow
+    Client->>Gateway: POST /api/auth/register
+    Gateway->>Auth: Forward registration request
+    Auth->>Auth: Validate & hash password
+    Auth->>Auth: Generate JWT tokens
+    Auth->>User: Create user profile
+    User->>User: Save profile to DB
+    User-->>Auth: Profile created
+    Auth-->>Gateway: Return tokens + user data
+    Gateway-->>Client: 201 Created
+
+    Note over Client,Notification: User Login Flow
+    Client->>Gateway: POST /api/auth/login
+    Gateway->>Cache: Check rate limit
+    Cache-->>Gateway: OK
+    Gateway->>Auth: Forward credentials
+    Auth->>Auth: Verify credentials
+    Auth->>Auth: Generate JWT tokens
+    Auth->>Cache: Store session
+    Auth-->>Gateway: Return tokens
+    Gateway-->>Client: 200 OK + tokens
+
+    Note over Client,Notification: Get Products Flow
+    Client->>Gateway: GET /api/products?category=electronics
+    Gateway->>Gateway: Validate JWT
+    Gateway->>Cache: Check cache
+    alt Cache Hit
+        Cache-->>Gateway: Cached products
+        Gateway-->>Client: 200 OK + products
+    else Cache Miss
+        Gateway->>Product: Get products
+        Product->>Product: Query database
+        Product-->>Gateway: Products list
+        Gateway->>Cache: Store in cache (TTL: 1h)
+        Gateway-->>Client: 200 OK + products
+    end
+
+    Note over Client,Notification: Create Order Flow
+    Client->>Gateway: POST /api/orders
+    Gateway->>Gateway: Validate JWT
+    Gateway->>Order: Create order
+    Order->>Product: Check inventory
+    Product->>Product: Verify stock
+    Product-->>Order: Stock available
+    Order->>Order: Create order in DB
+    Order->>Queue: Publish order.created event
+    Order-->>Gateway: Order created
+    Gateway-->>Client: 201 Created
+
+    Queue->>Payment: Consume order.created
+    Payment->>Payment: Process payment
+    Payment->>Payment: Charge customer
+    Payment->>Payment: Save transaction
+    Payment->>Queue: Publish payment.completed
+
+    Queue->>Order: Consume payment.completed
+    Order->>Order: Update order status
+    Order->>Queue: Publish order.confirmed
+
+    Queue->>Product: Consume order.confirmed
+    Product->>Product: Reduce inventory
+
+    Queue->>Notification: Consume order.confirmed
+    Notification->>Notification: Prepare notification
+    Notification->>Client: Send email confirmation
+    Notification->>Notification: Log notification
+
+    Note over Client,Notification: Get User Profile Flow
+    Client->>Gateway: GET /api/users/profile
+    Gateway->>Gateway: Validate JWT
+    Gateway->>User: Get profile
+    User->>User: Query database
+    User->>Cache: Get preferences
+    User-->>Gateway: User data
+    Gateway-->>Client: 200 OK + profile
+
+    Note over Client,Notification: Update Profile Flow
+    Client->>Gateway: PUT /api/users/profile
+    Gateway->>Gateway: Validate JWT
+    Gateway->>User: Update profile
+    User->>User: Validate data
+    User->>User: Update database
+    User->>Cache: Invalidate cached data
+    User-->>Gateway: Updated profile
+    Gateway-->>Client: 200 OK
+
+    Note over Client,Notification: Error Handling Flow
+    Client->>Gateway: POST /api/orders
+    Gateway->>Gateway: Validate JWT
+    Gateway->>Order: Create order
+    Order->>Product: Check inventory
+    Product-->>Order: Out of stock
+    Order-->>Gateway: 422 Unprocessable Entity
+    Gateway-->>Client: Error response
+```

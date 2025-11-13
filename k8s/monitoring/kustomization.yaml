@@ -1,0 +1,90 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+# Create monitoring namespace
+resources:
+  - namespace.yaml
+
+  # Prometheus
+  - prometheus/rbac.yaml
+  - prometheus/configmap.yaml
+  - prometheus/pvc.yaml
+  - prometheus/deployment.yaml
+  - prometheus/service.yaml
+  - prometheus/servicemonitor.yaml
+
+  # Grafana
+  - grafana/secret.yaml
+  - grafana/configmap.yaml
+  - grafana/pvc.yaml
+  - grafana/deployment.yaml
+  - grafana/service.yaml
+  - grafana-dashboards-configmap.yaml
+
+  # Node Exporter
+  - node-exporter/daemonset.yaml
+  - node-exporter/service.yaml
+
+  # Kube State Metrics
+  - kube-state-metrics/rbac.yaml
+  - kube-state-metrics/deployment.yaml
+  - kube-state-metrics/service.yaml
+
+  # AlertManager
+  - alertmanager/secret.yaml
+  - alertmanager/configmap.yaml
+  - alertmanager/deployment.yaml
+  - alertmanager/service.yaml
+
+  # Prometheus Rules
+  - prometheus-rules/service-alerts.yaml
+  - prometheus-rules/resource-alerts.yaml
+  - prometheus-rules/database-alerts.yaml
+  - prometheus-rules/business-alerts.yaml
+
+commonLabels:
+  monitoring: prometheus-stack
+  environment: production
+
+# Configuration to customize resources
+configMapGenerator:
+  - name: grafana-dashboards
+    files:
+      - grafana/dashboards/cluster-overview.json
+      - grafana/dashboards/microservices-overview.json
+      - grafana/dashboards/api-gateway-dashboard.json
+      - grafana/dashboards/database-dashboard.json
+      - grafana/dashboards/business-metrics-dashboard.json
+
+# Patches for production customization
+patches:
+  # Increase Prometheus retention for production
+  - target:
+      kind: Deployment
+      name: prometheus
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args/2
+        value: '--storage.tsdb.retention.time=30d'
+
+  # Enable persistent storage
+  - target:
+      kind: PersistentVolumeClaim
+    patch: |-
+      - op: replace
+        path: /spec/storageClassName
+        value: 'fast-ssd'
+
+images:
+  - name: prom/prometheus
+    newTag: v2.48.0
+  - name: grafana/grafana
+    newTag: 10.2.0
+  - name: prom/node-exporter
+    newTag: v1.7.0
+  - name: prom/alertmanager
+    newTag: v0.26.0
+  - name: registry.k8s.io/kube-state-metrics/kube-state-metrics
+    newTag: v2.10.1

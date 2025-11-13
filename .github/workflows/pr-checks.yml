@@ -1,0 +1,454 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  pr-info:
+    name: PR Information
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR Details
+        run: |
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "PR Title: ${{ github.event.pull_request.title }}"
+          echo "PR Author: ${{ github.event.pull_request.user.login }}"
+          echo "Base Branch: ${{ github.event.pull_request.base.ref }}"
+          echo "Head Branch: ${{ github.event.pull_request.head.ref }}"
+
+  detect-changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      k8s: ${{ steps.filter.outputs.k8s }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api-gateway:
+              - 'services/api-gateway/**'
+            auth-service:
+              - 'services/auth-service/**'
+            user-service:
+              - 'services/user-service/**'
+            product-service:
+              - 'services/product-service/**'
+            order-service:
+              - 'services/order-service/**'
+            payment-service:
+              - 'services/payment-service/**'
+            notification-service:
+              - 'services/notification-service/**'
+            frontend:
+              - 'frontend/**'
+            k8s:
+              - 'k8s/**'
+            workflows:
+              - '.github/workflows/**'
+
+  lint-services:
+    name: Lint - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: services/${{ matrix.service }}
+        run: npm run lint -- --format json --output-file eslint-report.json
+        continue-on-error: true
+
+      - name: Annotate code with linting results
+        uses: ataylorme/eslint-annotate-action@v2
+        if: always()
+        with:
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          report-json: 'services/${{ matrix.service }}/eslint-report.json'
+
+  test-services:
+    name: Test - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: services/${{ matrix.service }}
+        run: npm run test:coverage
+
+      - name: Check test coverage threshold
+        working-directory: services/${{ matrix.service }}
+        run: |
+          # Check if coverage meets minimum threshold (80%)
+          coverage=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          if (( $(echo "$coverage < 80" | bc -l) )); then
+            echo "Coverage $coverage% is below threshold 80%"
+            exit 1
+          fi
+          echo "Coverage: $coverage%"
+
+  lint-frontend:
+    name: Lint - Frontend
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint
+
+  test-frontend:
+    name: Test - Frontend
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run tests
+        working-directory: frontend
+        run: npm run test -- --coverage --watchAll=false
+
+  docker-build-check:
+    name: Docker Build - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine context path
+        id: context
+        run: |
+          if [ "${{ matrix.component }}" == "frontend" ]; then
+            echo "path=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "path=services/${{ matrix.component }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.context.outputs.path }}
+          file: ${{ steps.context.outputs.path }}/Dockerfile
+          push: false
+          tags: ${{ matrix.component }}:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Scan - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: [detect-changes, docker-build-check]
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine context path
+        id: context
+        run: |
+          if [ "${{ matrix.component }}" == "frontend" ]; then
+            echo "path=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "path=services/${{ matrix.component }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.context.outputs.path }}
+          file: ${{ steps.context.outputs.path }}/Dockerfile
+          push: false
+          load: true
+          tags: ${{ matrix.component }}:scan
+          cache-from: type=gha
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.component }}:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: trivy-${{ matrix.component }}
+
+  dependency-audit:
+    name: Dependency Audit - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - api-gateway
+          - auth-service
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Determine path
+        id: path
+        run: |
+          if [ "${{ matrix.component }}" == "frontend" ]; then
+            echo "dir=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "dir=services/${{ matrix.component }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run npm audit
+        working-directory: ${{ steps.path.outputs.dir }}
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+  breaking-changes-check:
+    name: Check for Breaking Changes
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for breaking changes in API contracts
+        run: |
+          echo "Checking for breaking changes..."
+
+          # Check for changes in API routes/controllers
+          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD --name-only | grep -E "(routes|controllers)" || true
+
+          # Add your breaking change detection logic here
+          echo "Breaking changes check completed"
+
+  validate-k8s:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.k8s == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin
+
+      - name: Validate Kubernetes manifests
+        run: |
+          find k8s -name '*.yaml' -type f | xargs kubeval --strict
+
+  pr-comment:
+    name: Post PR Comment
+    runs-on: ubuntu-latest
+    needs: [lint-services, test-services, docker-build-check, security-scan]
+    if: always()
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Create PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const lintStatus = '${{ needs.lint-services.result }}';
+            const testStatus = '${{ needs.test-services.result }}';
+            const dockerStatus = '${{ needs.docker-build-check.result }}';
+            const securityStatus = '${{ needs.security-scan.result }}';
+
+            const statusEmoji = (status) => {
+              if (status === 'success') return ':white_check_mark:';
+              if (status === 'failure') return ':x:';
+              return ':warning:';
+            };
+
+            const comment = `## PR Checks Summary
+
+            | Check | Status |
+            |-------|--------|
+            | Linting | ${statusEmoji(lintStatus)} ${lintStatus} |
+            | Tests | ${statusEmoji(testStatus)} ${testStatus} |
+            | Docker Build | ${statusEmoji(dockerStatus)} ${dockerStatus} |
+            | Security Scan | ${statusEmoji(securityStatus)} ${securityStatus} |
+
+            **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ${lintStatus === 'failure' || testStatus === 'failure' || dockerStatus === 'failure' ? '⚠️ Some checks failed. Please review the logs above.' : '✅ All checks passed!'}
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  pr-size-check:
+    name: Check PR Size
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | wc -l)
+          CHANGED_LINES=$(git diff --shortstat origin/${{ github.event.pull_request.base.ref }}...HEAD | awk '{print $4+$6}')
+
+          echo "Changed files: $CHANGED_FILES"
+          echo "Changed lines: $CHANGED_LINES"
+
+          if [ "$CHANGED_FILES" -gt 50 ] || [ "$CHANGED_LINES" -gt 1000 ]; then
+            echo "⚠️ Large PR detected! Consider breaking it into smaller PRs."
+            echo "Files changed: $CHANGED_FILES (recommended: <50)"
+            echo "Lines changed: $CHANGED_LINES (recommended: <1000)"
+          else
+            echo "✅ PR size is reasonable"
+          fi

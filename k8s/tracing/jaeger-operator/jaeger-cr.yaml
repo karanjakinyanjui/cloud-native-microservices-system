@@ -1,0 +1,161 @@
+---
+apiVersion: jaegertracing.io/v1
+kind: Jaeger
+metadata:
+  name: jaeger-production
+  namespace: default
+spec:
+  strategy: production
+
+  storage:
+    type: elasticsearch
+    options:
+      es:
+        server-urls: http://elasticsearch:9200
+        index-prefix: jaeger
+        username: elastic
+        password: changeme
+    esIndexCleaner:
+      enabled: true
+      numberOfDays: 7
+      schedule: "55 23 * * *"
+
+  collector:
+    replicas: 3
+    maxReplicas: 5
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    options:
+      collector:
+        num-workers: 100
+        queue-size: 5000
+        zipkin:
+          host-port: :9411
+      log-level: info
+    autoscale: true
+
+  query:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+    options:
+      query:
+        base-path: /jaeger
+      log-level: info
+    metricsStorage:
+      type: prometheus
+    ingress:
+      enabled: true
+      annotations:
+        kubernetes.io/ingress.class: nginx
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts:
+      - jaeger.example.com
+      tls:
+      - secretName: jaeger-tls
+        hosts:
+        - jaeger.example.com
+
+  agent:
+    strategy: DaemonSet
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    options:
+      log-level: info
+
+  sampling:
+    options:
+      default_strategy:
+        type: probabilistic
+        param: 0.5
+      service_strategies:
+      - service: user-service
+        type: probabilistic
+        param: 0.5
+      - service: product-service
+        type: probabilistic
+        param: 0.5
+      - service: order-service
+        type: probabilistic
+        param: 0.8
+      - service: payment-service
+        type: probabilistic
+        param: 1.0
+      - service: inventory-service
+        type: probabilistic
+        param: 0.5
+      - service: notification-service
+        type: probabilistic
+        param: 0.3
+
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "14269"
+
+  labels:
+    app: jaeger
+    environment: production
+---
+apiVersion: jaegertracing.io/v1
+kind: Jaeger
+metadata:
+  name: jaeger-simple
+  namespace: default
+spec:
+  strategy: allInOne
+
+  allInOne:
+    image: jaegertracing/all-in-one:1.51
+    options:
+      log-level: info
+      memory:
+        max-traces: 50000
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+
+  storage:
+    type: memory
+    options:
+      memory:
+        max-traces: 50000
+
+  sampling:
+    options:
+      default_strategy:
+        type: probabilistic
+        param: 1.0
+
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+    hosts:
+    - jaeger-dev.example.com
+
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "14269"
+
+  labels:
+    app: jaeger
+    environment: development

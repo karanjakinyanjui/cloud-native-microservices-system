@@ -1,0 +1,125 @@
+```mermaid
+graph TB
+    subgraph "Internet"
+        Users[Users/Clients]
+    end
+
+    subgraph "Cloud Load Balancer"
+        LB[Load Balancer<br/>Public IP<br/>SSL Termination]
+    end
+
+    subgraph "Kubernetes Cluster - VPC: 10.0.0.0/16"
+        subgraph "Public Subnet - 10.0.1.0/24"
+            IngressCtrl[Nginx Ingress<br/>10.0.1.10]
+        end
+
+        subgraph "Private Subnet - Application - 10.0.2.0/24"
+            Gateway1[API Gateway<br/>10.0.2.10]
+            Gateway2[API Gateway<br/>10.0.2.11]
+            Auth1[Auth Service<br/>10.0.2.20]
+            Auth2[Auth Service<br/>10.0.2.21]
+            User1[User Service<br/>10.0.2.30]
+            Product1[Product Service<br/>10.0.2.40]
+            Order1[Order Service<br/>10.0.2.50]
+            Payment1[Payment Service<br/>10.0.2.60]
+            Notification1[Notification Service<br/>10.0.2.70]
+        end
+
+        subgraph "Private Subnet - Data - 10.0.3.0/24"
+            Postgres[PostgreSQL<br/>10.0.3.10]
+            Redis[Redis<br/>10.0.3.20]
+            MessageQ[Message Queue<br/>10.0.3.30]
+        end
+
+        subgraph "Private Subnet - Monitoring - 10.0.4.0/24"
+            Prometheus[Prometheus<br/>10.0.4.10]
+            Grafana[Grafana<br/>10.0.4.20]
+            Jaeger[Jaeger<br/>10.0.4.30]
+        end
+
+        subgraph "Network Policies"
+            NP1[Policy: Allow Ingress<br/>to API Gateway]
+            NP2[Policy: Allow Gateway<br/>to Services]
+            NP3[Policy: Allow Services<br/>to Databases]
+            NP4[Policy: Deny All<br/>by Default]
+        end
+
+        subgraph "Service Mesh - mTLS"
+            Mesh[Istio/Linkerd<br/>Encrypts all traffic<br/>between services]
+        end
+    end
+
+    subgraph "External Services"
+        PaymentGateway[Payment Gateway<br/>Stripe API]
+        EmailService[Email Service<br/>SendGrid API]
+        SMSService[SMS Service<br/>Twilio API]
+    end
+
+    Users -->|HTTPS:443| LB
+    LB -->|HTTP:80| IngressCtrl
+
+    IngressCtrl -->|HTTP:3000| Gateway1
+    IngressCtrl -->|HTTP:3000| Gateway2
+
+    Gateway1 -->|HTTP:3001| Auth1
+    Gateway1 -->|HTTP:3002| User1
+    Gateway1 -->|HTTP:3003| Product1
+    Gateway2 -->|HTTP:3004| Order1
+    Gateway2 -->|HTTP:3005| Payment1
+    Gateway2 -->|HTTP:3006| Notification1
+
+    Auth1 -->|TCP:5432| Postgres
+    Auth2 -->|TCP:5432| Postgres
+    User1 -->|TCP:5432| Postgres
+    Product1 -->|TCP:5432| Postgres
+    Order1 -->|TCP:5432| Postgres
+    Payment1 -->|TCP:5432| Postgres
+    Notification1 -->|TCP:5432| Postgres
+
+    Gateway1 -->|TCP:6379| Redis
+    Gateway2 -->|TCP:6379| Redis
+
+    Order1 -->|AMQP:5672| MessageQ
+    Payment1 -->|AMQP:5672| MessageQ
+    Notification1 -->|AMQP:5672| MessageQ
+
+    Payment1 -->|HTTPS:443| PaymentGateway
+    Notification1 -->|HTTPS:443| EmailService
+    Notification1 -->|HTTPS:443| SMSService
+
+    Gateway1 -.->|Metrics:9090| Prometheus
+    Auth1 -.->|Metrics:9090| Prometheus
+    User1 -.->|Metrics:9090| Prometheus
+    Product1 -.->|Metrics:9090| Prometheus
+
+    Prometheus -.->|HTTP:3000| Grafana
+
+    Gateway1 -.->|UDP:6831| Jaeger
+    Auth1 -.->|UDP:6831| Jaeger
+
+    NP1 -.->|Enforces| IngressCtrl
+    NP2 -.->|Enforces| Gateway1
+    NP3 -.->|Enforces| Postgres
+    NP4 -.->|Default| Gateway1
+
+    Mesh -.->|mTLS| Gateway1
+    Mesh -.->|mTLS| Auth1
+    Mesh -.->|mTLS| User1
+
+    style Users fill:#e3f2fd
+    style LB fill:#fff3e0
+    style IngressCtrl fill:#ff9800
+    style Gateway1 fill:#2196f3
+    style Gateway2 fill:#2196f3
+    style Auth1 fill:#9c27b0
+    style Auth2 fill:#9c27b0
+    style Postgres fill:#4caf50
+    style Redis fill:#f44336
+    style Prometheus fill:#ff5722
+    style Grafana fill:#ff5722
+    style Jaeger fill:#ff5722
+    style NP1 fill:#fce4ec
+    style NP2 fill:#fce4ec
+    style NP3 fill:#fce4ec
+    style NP4 fill:#fce4ec
+```

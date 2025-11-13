@@ -1,0 +1,223 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: auth-db-backup
+  namespace: default
+  labels:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database-backup
+    app.kubernetes.io/part-of: microservices-system
+spec:
+  # Run daily at 2:00 AM
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth-db
+        app.kubernetes.io/component: database-backup
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 3600  # 1 hour timeout
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: auth-db
+            app.kubernetes.io/component: database-backup
+        spec:
+          restartPolicy: OnFailure
+
+          # Security Context
+          securityContext:
+            runAsUser: 999
+            runAsNonRoot: true
+            fsGroup: 999
+
+          containers:
+            - name: postgres-backup
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  echo "========================================"
+                  echo "PostgreSQL Backup Job Started"
+                  echo "Time: $(date)"
+                  echo "Database: ${POSTGRES_DB}"
+                  echo "========================================"
+
+                  # Define backup variables
+                  BACKUP_DIR="/backups"
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_FILE="${BACKUP_DIR}/auth-db-backup-${TIMESTAMP}.sql.gz"
+                  SUCCESS=0
+
+                  # Create backup directory
+                  mkdir -p "${BACKUP_DIR}"
+
+                  # Wait for database to be ready
+                  echo "Checking database connectivity..."
+                  until pg_isready -h "${DB_HOST}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; do
+                    echo "Waiting for database to be ready..."
+                    sleep 5
+                  done
+                  echo "Database is ready!"
+
+                  # Perform backup
+                  echo "Starting backup to: ${BACKUP_FILE}"
+                  pg_dump -h "${DB_HOST}" \
+                          -U "${POSTGRES_USER}" \
+                          -d "${POSTGRES_DB}" \
+                          -F c \
+                          -b \
+                          -v \
+                          -f "${BACKUP_FILE%.gz}" 2>&1 | tee /tmp/backup.log
+
+                  # Compress backup
+                  echo "Compressing backup..."
+                  gzip "${BACKUP_FILE%.gz}"
+
+                  # Verify backup was created
+                  if [ -f "${BACKUP_FILE}" ]; then
+                    BACKUP_SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
+                    echo "✓ Backup completed successfully!"
+                    echo "  File: ${BACKUP_FILE}"
+                    echo "  Size: ${BACKUP_SIZE}"
+                    SUCCESS=1
+                  else
+                    echo "✗ ERROR: Backup file was not created!"
+                    exit 1
+                  fi
+
+                  # Cleanup old backups (keep last 7 days)
+                  echo "Cleaning up old backups..."
+                  OLD_BACKUPS=$(find "${BACKUP_DIR}" -name "auth-db-backup-*.sql.gz" -mtime +7 | wc -l)
+                  find "${BACKUP_DIR}" -name "auth-db-backup-*.sql.gz" -mtime +7 -delete
+                  echo "Removed ${OLD_BACKUPS} old backup(s)"
+
+                  # List current backups
+                  echo ""
+                  echo "Current backups:"
+                  ls -lh "${BACKUP_DIR}"/auth-db-backup-*.sql.gz 2>/dev/null || echo "No backups found"
+
+                  # Create backup metadata
+                  cat > "${BACKUP_FILE}.metadata" <<EOF
+                  {
+                    "timestamp": "${TIMESTAMP}",
+                    "database": "${POSTGRES_DB}",
+                    "size": "${BACKUP_SIZE}",
+                    "host": "${DB_HOST}",
+                    "backup_file": "${BACKUP_FILE}",
+                    "completed_at": "$(date -Iseconds)"
+                  }
+                  EOF
+
+                  echo "========================================"
+                  echo "Backup Job Completed Successfully!"
+                  echo "========================================"
+
+                  # Send notification (optional - uncomment and configure webhook)
+                  # if [ $SUCCESS -eq 1 ]; then
+                  #   curl -X POST "${WEBHOOK_URL}" \
+                  #        -H "Content-Type: application/json" \
+                  #        -d "{\"text\":\"✓ PostgreSQL backup completed: auth-db (${BACKUP_SIZE})\"}"
+                  # fi
+
+              env:
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: auth-db-secret
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: auth-db-secret
+                      key: POSTGRES_PASSWORD
+                - name: POSTGRES_DB
+                  valueFrom:
+                    secretKeyRef:
+                      name: auth-db-secret
+                      key: POSTGRES_DB
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: auth-db-secret
+                      key: POSTGRES_PASSWORD
+                - name: DB_HOST
+                  value: "auth-db-postgresql-0.auth-db-postgresql-headless"
+                # - name: WEBHOOK_URL
+                #   value: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 512Mi
+
+              volumeMounts:
+                - name: backup
+                  mountPath: /backups
+
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: auth-db-backup-pvc
+---
+# CronJob for WAL archiving cleanup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: auth-db-wal-cleanup
+  namespace: default
+  labels:
+    app.kubernetes.io/name: auth-db
+    app.kubernetes.io/component: database-maintenance
+    app.kubernetes.io/part-of: microservices-system
+spec:
+  # Run daily at 3:00 AM (after backup)
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: wal-cleanup
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  echo "Cleaning up old WAL archives..."
+                  # Remove WAL files older than 7 days
+                  find /wal-archive -name "*.backup" -mtime +7 -delete
+                  find /wal-archive -type f -mtime +7 -delete
+                  echo "WAL cleanup completed"
+              volumeMounts:
+                - name: wal-archive
+                  mountPath: /wal-archive
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: wal-archive
+              persistentVolumeClaim:
+                claimName: auth-db-wal-archive-pvc

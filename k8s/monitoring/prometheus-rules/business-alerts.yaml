@@ -1,0 +1,222 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-business-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: monitoring
+data:
+  business-alerts.yaml: |
+    groups:
+      - name: business_metrics
+        interval: 60s
+        rules:
+          # Low order rate
+          - alert: LowOrderRate
+            expr: |
+              rate(orders_total{job="order-service"}[15m]) * 60 < 1
+              and
+              hour() >= 9 and hour() <= 21  # Only during business hours
+            for: 15m
+            labels:
+              severity: warning
+              type: business
+              component: order-service
+            annotations:
+              summary: "Low order rate detected"
+              description: "Order rate is {{ $value | humanize }} orders/minute, which is below the expected threshold during business hours."
+
+          # Very low order rate (critical)
+          - alert: VeryLowOrderRate
+            expr: |
+              rate(orders_total{job="order-service"}[15m]) * 60 < 0.1
+              and
+              hour() >= 9 and hour() <= 21
+            for: 10m
+            labels:
+              severity: critical
+              type: business
+              component: order-service
+            annotations:
+              summary: "Very low order rate detected"
+              description: "Order rate is critically low at {{ $value | humanize }} orders/minute during business hours."
+
+          # High payment failure rate
+          - alert: HighPaymentFailureRate
+            expr: |
+              (
+                sum(rate(payment_failures_total{job="payment-service"}[10m]))
+                /
+                sum(rate(payment_attempts_total{job="payment-service"}[10m]))
+              ) * 100 > 5
+            for: 10m
+            labels:
+              severity: critical
+              type: business
+              component: payment-service
+            annotations:
+              summary: "High payment failure rate"
+              description: "Payment failure rate is {{ $value | humanize }}%, which is above the 5% threshold."
+
+          # Payment gateway errors
+          - alert: PaymentGatewayErrors
+            expr: |
+              sum(rate(payment_gateway_errors_total{job="payment-service"}[5m])) > 0.5
+            for: 5m
+            labels:
+              severity: critical
+              type: business
+              component: payment-service
+            annotations:
+              summary: "Payment gateway experiencing errors"
+              description: "Payment gateway is experiencing {{ $value | humanize }} errors/sec."
+
+          # Low user registration rate
+          - alert: LowUserRegistrationRate
+            expr: |
+              rate(user_registrations_total{job="user-service"}[1h]) * 3600 < 5
+              and
+              hour() >= 9 and hour() <= 21
+            for: 30m
+            labels:
+              severity: warning
+              type: business
+              component: user-service
+            annotations:
+              summary: "Low user registration rate"
+              description: "Only {{ $value | humanize }} users registered in the last hour during business hours."
+
+          # Failed user logins spike
+          - alert: HighLoginFailureRate
+            expr: |
+              (
+                sum(rate(user_login_failures_total{job="auth-service"}[5m]))
+                /
+                sum(rate(user_login_attempts_total{job="auth-service"}[5m]))
+              ) * 100 > 20
+            for: 10m
+            labels:
+              severity: warning
+              type: business
+              component: auth-service
+            annotations:
+              summary: "High login failure rate"
+              description: "Login failure rate is {{ $value | humanize }}%, which may indicate credential stuffing or UX issues."
+
+          # Abandoned carts high
+          - alert: HighCartAbandonmentRate
+            expr: |
+              (
+                sum(rate(cart_abandoned_total{job="order-service"}[30m]))
+                /
+                sum(rate(cart_created_total{job="order-service"}[30m]))
+              ) * 100 > 70
+            for: 30m
+            labels:
+              severity: warning
+              type: business
+              component: order-service
+            annotations:
+              summary: "High cart abandonment rate"
+              description: "Cart abandonment rate is {{ $value | humanize }}%, which is above the 70% threshold."
+
+          # Revenue drop
+          - alert: RevenueDropDetected
+            expr: |
+              (
+                rate(revenue_total{job="order-service"}[1h])
+                /
+                rate(revenue_total{job="order-service"}[1h] offset 24h)
+              ) < 0.5
+              and
+              hour() >= 9 and hour() <= 21
+            for: 30m
+            labels:
+              severity: critical
+              type: business
+              component: order-service
+            annotations:
+              summary: "Significant revenue drop detected"
+              description: "Revenue is {{ $value | humanizePercentage }} of yesterday's rate at the same time."
+
+          # Inventory alerts
+          - alert: LowInventoryForPopularProduct
+            expr: product_inventory{job="product-service",popularity="high"} < 10
+            for: 5m
+            labels:
+              severity: warning
+              type: business
+              component: product-service
+            annotations:
+              summary: "Low inventory for popular product"
+              description: "Product {{ $labels.product_id }} has only {{ $value }} units remaining."
+
+          # Product out of stock
+          - alert: ProductOutOfStock
+            expr: product_inventory{job="product-service"} == 0
+            for: 5m
+            labels:
+              severity: warning
+              type: business
+              component: product-service
+            annotations:
+              summary: "Product out of stock"
+              description: "Product {{ $labels.product_id }} is out of stock."
+
+          # Notification delivery failures
+          - alert: NotificationDeliveryFailures
+            expr: |
+              (
+                sum(rate(notifications_failed_total{job="notification-service"}[10m]))
+                /
+                sum(rate(notifications_sent_total{job="notification-service"}[10m]))
+              ) * 100 > 10
+            for: 10m
+            labels:
+              severity: warning
+              type: business
+              component: notification-service
+            annotations:
+              summary: "High notification delivery failure rate"
+              description: "{{ $value | humanize }}% of notifications are failing to deliver."
+
+          # Customer support ticket spike
+          - alert: SupportTicketSpike
+            expr: |
+              rate(support_tickets_created_total[15m])
+              >
+              avg_over_time(rate(support_tickets_created_total[15m])[1d:15m]) * 2
+            for: 15m
+            labels:
+              severity: warning
+              type: business
+            annotations:
+              summary: "Spike in support ticket creation"
+              description: "Support ticket creation rate is {{ $value | humanize }}x higher than daily average."
+
+          # Fraudulent transaction detection
+          - alert: SuspiciousFraudActivity
+            expr: |
+              rate(fraud_checks_flagged_total{job="payment-service"}[10m]) > 5
+            for: 10m
+            labels:
+              severity: critical
+              type: business
+              component: payment-service
+            annotations:
+              summary: "Suspicious fraud activity detected"
+              description: "{{ $value | humanize }} transactions/sec are being flagged as potentially fraudulent."
+
+          # API rate limit hits
+          - alert: APIRateLimitHitsHigh
+            expr: |
+              rate(api_rate_limit_exceeded_total{job="api-gateway"}[5m]) > 10
+            for: 10m
+            labels:
+              severity: warning
+              type: business
+              component: api-gateway
+            annotations:
+              summary: "High API rate limit rejections"
+              description: "{{ $value | humanize }} requests/sec are being rejected due to rate limiting."
